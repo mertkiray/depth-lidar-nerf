@@ -1,0 +1,9 @@
+.idea
+/data
+/data/**
+/logs
+/resources
+/runs
+/images
+/preprocess/KITTI360/poses_bounds.npy
+/preprocess/KITTI360/depth_gt.npy

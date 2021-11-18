@@ -1,0 +1,28 @@
+expname = waymo_exp_4
+basedir = ./logs
+datadir = ./images
+dataset_type = llff
+
+N_rand = 1024
+N_samples = 64
+N_importance = 64
+
+use_viewdirs = True
+raw_noise_std = 1e0
+
+chunk = 8192
+netchunk = 16384
+netdepth = 4
+
+i_testset = 1000
+i_video = 50000
+N_iters = 200000
+
+factor=1
+
+train_scene = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+test_scene = [21]
+no_ndc = True
+colmap_depth = True
+depth_loss = True
+depth_lambda = 0.1
