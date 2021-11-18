@@ -5,5 +5,5 @@
 /resources
 /runs
 /images
-/preprocess/KITTI360/poses_bounds.npy
-/preprocess/KITTI360/depth_gt.npy
+/images/poses_bounds.npy
+/images/depth_gt.npy
