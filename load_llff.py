@@ -69,7 +69,8 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
     poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1,2,0]) # 3 x 5 x N
     bds = poses_arr[:, -2:].transpose([1,0])
     
-    img0 = [os.path.join(basedir, 'images', f) for f in sorted(os.listdir(os.path.join(basedir, 'images'))) \
+    img0 = [os.path.join(basedir, 'images', f) for f in sorted(os.listdir(os.path.join(basedir,
+                                                                                                  'images'))) \
             if f.endswith('JPG') or f.endswith('jpg') or f.endswith('png')][0]
     sh = imageio.imread(img0).shape
     
@@ -253,8 +254,13 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     # print('poses_bound.npy:\n', poses[:,:,0])
 
     # Correct rotation matrix ordering and move variable dim to axis 0
-    # TODO: check this
-    poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:, :], -poses[:, 0:1, :]], 1) # [-u, r, -t] -> [r, u, -t]
+    # TODO: check this our rotation vs their rotation
+    # our rotation
+    #poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:3, :], -poses[:, :1, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
+
+    # their rotation
+    poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1) # [-u, r, -t] -> [r, u, -t]
+    print(poses.shape)
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
     imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
     images = imgs
@@ -439,7 +445,9 @@ def load_sensor_depth(basedir, factor=8, bd_factor=.75):
     np.save(data_file, data_list)
     return data_list
 
-    
-
+def load_lidar_depth(basedir, factor=8, bd_factor=.75):
+    data_file = os.path.join(basedir, 'depth_gt.npy')
+    data_list = np.load(data_file, allow_pickle=True)
+    return data_list
     
 

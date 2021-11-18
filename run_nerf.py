@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 from run_nerf_helpers import *
 
-from load_llff import load_llff_data, load_colmap_depth
+from load_llff import load_llff_data, load_lidar_depth
 from load_dtu import load_dtu_data
 
 from loss import SigmaLoss
@@ -634,11 +634,15 @@ def train():
 
     if args.dataset_type == 'llff':
         if args.colmap_depth:
-            depth_gts = load_colmap_depth(args.datadir, factor=args.factor, bd_factor=.75)
+            depth_gts = load_lidar_depth(args.datadir, factor=args.factor, bd_factor=.75)
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
                                                                   spherify=args.spherify)
         hwf = poses[0,:3,-1]
+
+        #print(hwf)
+        #exit(0)
+
         poses = poses[:,:3,:4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
         if not isinstance(i_test, list):
@@ -691,7 +695,7 @@ def train():
         near = 0.1
         far = 5.0
         if args.colmap_depth:
-            depth_gts = load_colmap_depth(args.datadir, factor=args.factor, bd_factor=.75)
+            depth_gts = load_lidar_depth(args.datadir, factor=args.factor, bd_factor=.75)
     else:
         print('Unknown dataset type', args.dataset_type, 'exiting')
         return
@@ -799,6 +803,8 @@ def train():
         if args.debug:
             print('rays.shape:', rays.shape)
         print('done, concats')
+        print(rays.shape)
+        print(images[:,None].shape)
         rays_rgb = np.concatenate([rays, images[:,None]], 1) # [N, ro+rd+rgb, H, W, 3]
         if args.debug:
             print('rays_rgb.shape:', rays_rgb.shape)
@@ -1064,8 +1070,8 @@ def train():
             test_psnr = mse2psnr(test_loss)
 
 
-            writer.add_scalar("Test/loss", loss, i)
-            writer.add_scalar("Test/psnr", psnr, i)
+            writer.add_scalar("Test/loss", test_loss, i)
+            writer.add_scalar("Test/psnr", test_psnr, i)
 
 
         if i%args.i_print==0:
