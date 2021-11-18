@@ -211,10 +211,10 @@ class Kitti360Dataset(object):
 
         poses = np.concatenate([poses, min_max_depths], axis=1)
 
-        numpy.save('poses_bounds.npy', poses)
+        numpy.save('../../images/poses_bounds.npy', poses)
 
         # dict: 'depth': np.array(depth), 'coord': np.array(coord), 'weight': np.ones(depth.shape)
-        numpy.save('depth_gt.npy', depth_data_list)
+        numpy.save('../../images/depth_gt.npy', depth_data_list)
 
         return
 
