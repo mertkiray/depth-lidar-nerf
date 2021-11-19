@@ -31,7 +31,8 @@ class Kitti360Dataset(object):
 
         sequence = '2013_05_28_drive_%04d_sync' % seq
         pose_dir = '%s/data_poses/2013_05_28_drive_%04d_sync/' % (kitti360Path, seq)
-        self.pose_file = os.path.join(pose_dir, 'cam%d_to_world.txt' % cam_id)
+        self.pose2_file = os.path.join(pose_dir, 'cam%d_to_world.txt' % cam_id)
+        self.pose_file = os.path.join(pose_dir, 'poses.txt')
 
         self.raw3DPcdPath = os.path.join(kitti360Path, 'data_3d_raw', sequence, self.sensor_dir, 'data')
         self.raw2DImagePath = os.path.join(kitti360Path, 'data_2d_raw', sequence, ('image_%02d' % cam_id), 'data_rect')
@@ -173,10 +174,9 @@ class Kitti360Dataset(object):
 
     def get_pose_of_frame(self, frame_no):
 
-
         poses = np.loadtxt(self.pose_file)
         frames = poses[:, 0].astype(np.int)
-        poses = np.reshape(poses[:, 1:], (-1, 4, 4))
+        poses = np.reshape(poses[:, 1:], (-1, 3, 4))
 
         while frame_no not in frames:
             frame_no -= 1
@@ -204,8 +204,9 @@ class Kitti360Dataset(object):
         min_max_depths = np.array(min_max_depths)
 
         poses = np.array(poses).squeeze(1)[:,:3,:]
+        print(poses.shape)
         hwf = np.broadcast_to(hwf, (poses.shape[0], hwf.shape[0], hwf.shape[1]))
-        poses = np.append(poses, np.atleast_3d(hwf), axis=2)
+        poses = np.append(poses, hwf, axis=2)
         poses = poses.reshape(poses.shape[0], poses.shape[1] * poses.shape[2])
 
 

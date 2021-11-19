@@ -18,6 +18,8 @@ def preprocess_kitti():
         file = file.split('.png')
         image_nums.append(int(file[0].lstrip('0')))
 
+    image_nums.sort()
+
     dataset = Kitti360Dataset(seq_id, cam_id)
 
     processed_data = []
