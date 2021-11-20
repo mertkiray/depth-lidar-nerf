@@ -31,8 +31,8 @@ class Kitti360Dataset(object):
 
         sequence = '2013_05_28_drive_%04d_sync' % seq
         pose_dir = '%s/data_poses/2013_05_28_drive_%04d_sync/' % (kitti360Path, seq)
-        self.pose2_file = os.path.join(pose_dir, 'cam%d_to_world.txt' % cam_id)
-        self.pose_file = os.path.join(pose_dir, 'poses.txt')
+        self.pose_file = os.path.join(pose_dir, 'cam%d_to_world.txt' % cam_id)
+        # self.pose_file = os.path.join(pose_dir, 'poses.txt')
 
         self.raw3DPcdPath = os.path.join(kitti360Path, 'data_3d_raw', sequence, self.sensor_dir, 'data')
         self.raw2DImagePath = os.path.join(kitti360Path, 'data_2d_raw', sequence, ('image_%02d' % cam_id), 'data_rect')
@@ -176,7 +176,7 @@ class Kitti360Dataset(object):
 
         poses = np.loadtxt(self.pose_file)
         frames = poses[:, 0].astype(np.int)
-        poses = np.reshape(poses[:, 1:], (-1, 3, 4))
+        poses = np.reshape(poses[:, 1:], (-1, 4, 4))
 
         while frame_no not in frames:
             frame_no -= 1
@@ -262,10 +262,11 @@ if __name__ == '__main__':
     # set it to 0 or 1 for projection to perspective images
     #           2 or 3 for projecting to fisheye images
     cam_id = 0
-    frame = 555
+    frame = 13
 
     dataset = Kitti360Dataset(seq, cam_id)
-    dataset.visualize_data(frame, cam_id, visualizeIn2D)
+    #dataset.visualize_data(frame, cam_id, visualizeIn2D)
+    print(dataset.camera.cam2world[frame])
     # dataset.visualize_pcd(dataset.get_points_visible_in_camera())
 
 
