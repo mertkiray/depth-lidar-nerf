@@ -256,16 +256,12 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     # Correct rotation matrix ordering and move variable dim to axis 0
     # TODO: check this our rotation vs their rotation
     # our rotation
-    #poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:3, :], -poses[:, :1, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
-
-    # change from   #   xxx=forward, y=left, xxz=up to   change to "right xxup xxback"
-    poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:3, :], -poses[:, :1, :], poses[:, 3:, :]], 1)
+    poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:3, :], -poses[:, :1, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
     # their rotation
     #poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
 
-    print(poses.shape)
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
     imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
     images = imgs
