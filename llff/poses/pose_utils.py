@@ -8,6 +8,7 @@ from llff.poses.colmap_wrapper import run_colmap
 import llff.poses.colmap_read_model as read_model
 
 
+# TODO: 26.11.2021 DOUBLE CHECK THIS
 def load_colmap_data(realdir):
     
     camerasfile = os.path.join(realdir, 'sparse/0/cameras.bin')
@@ -53,6 +54,7 @@ def load_colmap_data(realdir):
     return poses, pts3d, perm
 
 
+# TODO: 26.11.2021 NEED TO DEAL
 def save_poses(basedir, poses, pts3d, perm):
     pts_arr = []
     vis_arr = []
@@ -138,7 +140,7 @@ def minify_v0(basedir, factors=[], resolutions=[]):
             
 
 
-
+# TODO: 26.11.2021 DOUBLE CHECK THIS
 def minify(basedir, factors=[], resolutions=[]):
     needtoload = False
     for r in factors:

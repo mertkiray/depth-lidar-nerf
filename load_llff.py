@@ -254,15 +254,18 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     # print('poses_bound.npy:\n', poses[:,:,0])
 
     # Correct rotation matrix ordering and move variable dim to axis 0
-    # TODO: check this our rotation vs their rotation
-    # our rotation
-    poses = np.concatenate([-poses[:, 1:2, :], poses[:, 2:3, :], -poses[:, :1, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
-    # their rotation
+    #original one
     #poses = np.concatenate([poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1) # [-u, r, -t] -> [r, u, -t]
+
+    # TODO: check this our rotation vs their rotation
+    # our rotation   x = forward, y = left, z = up   change to "right up back"    right down forward  0 -1 -2
+    poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
 
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
+
+    np.save('poses_our.npy', poses)
     imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
     images = imgs
     bds = np.moveaxis(bds, -1, 0).astype(np.float32)
@@ -282,7 +285,8 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
         poses, render_poses, bds = spherify_poses(poses, bds)
 
     else:
-        
+
+        print('ANANI SIKERIM COCUK')
         c2w = poses_avg(poses)
         print('recentered', c2w.shape)
         print(c2w[:3,:4])
@@ -329,7 +333,6 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
-
     return images, poses, bds, render_poses, i_test
 
 

@@ -3,7 +3,7 @@ import numpy as np
 import re
 import yaml
 import sys
-from loadCalibration import loadCalibrationCameraToPose
+from .loadCalibration import loadCalibrationCameraToPose
 
 
 def readYAMLFile(fileName):
@@ -18,7 +18,6 @@ def readYAMLFile(fileName):
         yamlFileOut = myRe.sub(r': \1', yamlFileOut)
         ret = yaml.load(yamlFileOut)
     return ret
-
 
 class Camera:
     def __init__(self):
@@ -36,6 +35,8 @@ class Camera:
             pose = np.concatenate((pose, np.array([0., 0., 0., 1.]).reshape(1, 4)))
             # consider the rectification for perspective cameras
             if self.cam_id == 0 or self.cam_id == 1:
+                # pose: GPS/IMU -> World   camToPose: camera -> GPS/IMU
+                # R_rect: unrectified -> rectified  === > (pose @ camtoPose @ R_rect^(-1))
                 self.cam2world[frame] = np.matmul(np.matmul(pose, self.camToPose),
                                                   np.linalg.inv(self.R_rect))
             # fisheye cameras
@@ -136,6 +137,8 @@ class CameraPerspective(Camera):
         self.K = K
         self.width, self.height = width, height
         self.focal = K[0][0]
+        self.x0 = K[0][2]
+        self.y0 = K[1][2]
         self.R_rect = R_rect
 
     def cam2image(self, points):

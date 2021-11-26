@@ -4,6 +4,8 @@ import imageio
 import json
 import random
 import time
+
+import open3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -131,6 +133,21 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     # Create ray batch
     rays_o = torch.reshape(rays_o, [-1,3]).float()
     rays_d = torch.reshape(rays_d, [-1,3]).float()
+
+    #print(f'rays_o shape :{rays_o.shape}')
+    #print(f'rays_d shape :{rays_d.shape}')
+
+    #rays_o_pcd = open3d.geometry.PointCloud()
+    #rays_o_pcd.points = open3d.utility.Vector3dVector(rays_o.to('cpu'))
+    #open3d.io.write_point_cloud("rays_o_t2.ply", rays_o_pcd)
+
+    #rays_d_pcd = open3d.geometry.PointCloud()
+    #rays_d_pcd.points = open3d.utility.Vector3dVector(rays_d.to('cpu'))
+    #open3d.io.write_point_cloud("rays_d_t2.ply", rays_d_pcd)
+
+    #open3d.visualization.draw_geometries([rays_o_pcd, rays_d_pcd])
+
+    #exit(0)
 
     near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
     rays = torch.cat([rays_o, rays_d, near, far], -1) # B x 8
@@ -640,8 +657,6 @@ def train():
                                                                   spherify=args.spherify)
         hwf = poses[0,:3,-1]
 
-        #print(hwf)
-        #exit(0)
 
         poses = poses[:,:3,:4]
         print('Loaded llff', images.shape, render_poses.shape, hwf, args.datadir)
@@ -741,6 +756,8 @@ def train():
     render_kwargs_test.update(bds_dict)
 
     # Move testing data to GPU
+    print(render_poses.shape)
+    np.save('render_poses.npy', render_poses)
     render_poses = torch.Tensor(render_poses).to(device)
 
     # Short circuit if only rendering out from trained model
