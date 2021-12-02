@@ -22,7 +22,6 @@ def mercatorToLatlon(mx, my, scale):
 def latToScale(lat):
     ''' compute mercator scale from latitude '''
     scale = np.cos(lat * np.pi / 180.0);
-    print(scale)
     return scale
 
 

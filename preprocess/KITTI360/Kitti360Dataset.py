@@ -76,7 +76,6 @@ class Kitti360Dataset(object):
 
     def get_velodyne_points_in_camera_coord(self, points, cam_id=0):
         TrVeloToRect = self.get_transform(cam_id)
-        print(TrVeloToRect)
         pointsCam = np.matmul(TrVeloToRect, points.T).T
         pointsCam = pointsCam[:, :3]
         return pointsCam
@@ -86,13 +85,9 @@ class Kitti360Dataset(object):
         TrVeloToRect = self.get_transform(cam_id)
         TrRectToVelo = np.linalg.inv(TrVeloToRect)
 
-        print('====')
-        print(points.shape)
-        print(TrRectToVelo.shape)
 
 
         points = np.concatenate([points,np.ones((points.shape[0], 1))], axis=1)
-        print(points.shape)
         points[:, 3] = 1
 
         points = TrRectToVelo @ points.T
@@ -229,12 +224,9 @@ class Kitti360Dataset(object):
 
         posestxt = self.get_posestxt_of_frame(frame)
 
-        print(pcd.shape)
 
         pcd = (posestxt @ TrCamToPose @ TrVeloToCam @ pcd.T).T
 
-        print('baban')
-        print(pcd.shape)
         return pcd
 
 
@@ -245,7 +237,6 @@ class Kitti360Dataset(object):
 
         TrCamToPose = self.camera.camToPose
 
-        print(TrVeloToCam)
 
         pcds = []
         poses = []
@@ -269,14 +260,12 @@ class Kitti360Dataset(object):
 
         pcds = pcds[0]
         pcds = pcds[:,:3]
-        print(pcds.shape)
 
         pcd = open3d.geometry.PointCloud()
         pcd.points = open3d.utility.Vector3dVector(pcds)
 
 
 
-        print(poses.shape)
         pose = poses[:,:3, 3]
 
 
@@ -312,7 +301,6 @@ class Kitti360Dataset(object):
 
         frame_index = np.where(frames == frame_no)[0]
         pose = poses[frame_index].squeeze(0)
-        print(pose.shape)
         pose = np.concatenate((pose, np.array([0., 0., 0., 1.]).reshape(1, 4)))
 
         return pose
@@ -336,10 +324,8 @@ class Kitti360Dataset(object):
             min_max_depths.append([min_depth, max_depth])
 
         min_max_depths = np.array(min_max_depths)
-        #print(np.array(poses).shape)
         poses = np.array(poses)[:,:3,:]
         #poses = np.array(poses)[:,:3,:]
-        print(poses.shape)
         hwf = np.broadcast_to(hwf, (poses.shape[0], hwf.shape[0], hwf.shape[1]))
         poses = np.append(poses, hwf, axis=2)
         poses = poses.reshape(poses.shape[0], poses.shape[1] * poses.shape[2])
@@ -469,10 +455,15 @@ if __name__ == '__main__':
     # set it to 0 or 1 for projection to perspective images
     #           2 or 3 for projecting to fisheye images
     cam_id = 0
-    frame = 13
+    frame = 5930
 
-    #dataset = Kitti360Dataset(seq, cam_id)
-    #dataset.visualize_data(frame, cam_id, visualizeIn2D)
+    dataset = Kitti360Dataset(seq, cam_id)
+    depth_arr = dataset.get_depth_map(5930)
+
+    plt.imshow(depth_arr)
+    plt.show()
+
+    dataset.visualize_data(frame, cam_id, visualizeIn2D)
     # dataset.visualize_pcd(dataset.get_points_visible_in_camera())
 
 

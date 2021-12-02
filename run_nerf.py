@@ -9,10 +9,12 @@ import open3d
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
+from moviepy.editor import *
 
 from run_nerf_helpers import *
 
@@ -26,6 +28,7 @@ from data import RayDataset
 from torch.utils.data import DataLoader
 
 from utils.generate_renderpath import generate_renderpath
+
 import cv2
 # import time
 
@@ -168,7 +171,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0):
+def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, iteration=0, writer=None):
 
     H, W, focal = hwf
 
@@ -209,6 +212,12 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             # depth_color[np.isnan(depth_color)] = 0
             # imageio.imwrite(os.path.join(savedir, '{:03d}_depth.png'.format(i)), depth_color)
             imageio.imwrite(os.path.join(savedir, '{:03d}_depth.png'.format(i)), depth)
+
+            if writer:
+                writer.add_image('Images/rgb', rgb8, iteration, dataformats='HWC')
+                writer.add_image('Images/depth', depth, iteration, dataformats='HW')
+
+
             np.savez(os.path.join(savedir, '{:03d}.npz'.format(i)), rgb=rgb.cpu().numpy(), disp=disp.cpu().numpy(), acc=acc.cpu().numpy(), depth=depth)
 
 
@@ -980,6 +989,23 @@ def train():
 
         # timer_split = time.perf_counter()
 
+
+        # Mert WIP
+        # if i%args.i_print==0:
+        #     with torch.no_grad():
+        #         print(f'render poses shape: {render_poses[0:1,:,:].shape}')
+        #         rgbsanan, dispsanan = render_path(render_poses[0:1,   :,:], hwf, args.chunk, render_kwargs_train)
+        #
+        #     print('=========')
+        #     print(rgbsanan.shape)
+        #     print('=========')
+        #
+        #     plt.imshow(rgbsanan.squeeze())
+        #     plt.show()
+
+
+
+
         optimizer.zero_grad()
         img_loss = img2mse(rgb, target_s)
         depth_loss = 0
@@ -991,7 +1017,7 @@ def train():
                 else:
                     depth_loss = torch.mean((((depth_col - target_depth) / max_depth) ** 2) * ray_weights)
             elif args.relative_loss:
-                depth_loss = torch.mean(((depth_col - target_depth) / target_depth)**2)
+                depth_loss = torch.mean(((depth_col - target_depth) / (target_depth + 1e-16))**2)
             else:
                 depth_loss = img2mse(depth_col, target_depth)
         sigma_loss = 0
@@ -1004,6 +1030,7 @@ def train():
 
         # timer_loss = time.perf_counter()
 
+        ## TODO: What is this?
         if 'rgb0' in extras and not args.no_coarse:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             loss = loss + img_loss0
@@ -1078,7 +1105,8 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
-                rgbs, disps = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+                rgbs, disps = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test,
+                                          gt_imgs=images[i_test], savedir=testsavedir, iteration=i, writer=writer)
             print('Saved test set')
 
             filenames = [os.path.join(testsavedir, '{:03d}.png'.format(k)) for k in range(len(i_test))]
@@ -1092,7 +1120,13 @@ def train():
 
 
         if i%args.i_print==0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+
+            if not args.depth_loss:
+                tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            else:
+                print_depth_loss = depth_loss * args.depth_lambda
+                writer.add_scalar("Train/depth_loss", print_depth_loss, i)
+                tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} Depth Loss: {depth_loss.item()}")
 
             writer.add_scalar("Train/loss", loss, i)
             writer.add_scalar("Train/psnr", psnr, i)
