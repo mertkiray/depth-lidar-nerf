@@ -286,7 +286,6 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     else:
 
-        print('ANANI SIKERIM COCUK')
         c2w = poses_avg(poses)
         print('recentered', c2w.shape)
         print(c2w[:3,:4])
@@ -452,6 +451,15 @@ def load_sensor_depth(basedir, factor=8, bd_factor=.75):
 def load_lidar_depth(basedir, factor=8, bd_factor=.75):
     data_file = os.path.join(basedir, 'depth_gt.npy')
     data_list = np.load(data_file, allow_pickle=True)
+
+    _, bds_raw, _ = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
+    sc = 1. if bd_factor is None else 1./(bds_raw.min() * bd_factor)
+
+    for data in data_list:
+        coord = data['coord'] / factor
+        data['coord'] = coord.astype(int)
+        data['depth'] *= sc
+
     return data_list
     
 
