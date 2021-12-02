@@ -14,7 +14,6 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
-from moviepy.editor import *
 
 from run_nerf_helpers import *
 
