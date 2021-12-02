@@ -890,6 +890,7 @@ def train():
     
     start = start + 1
     for i in trange(start, N_iters):
+        writer.add_scalar("Iteration", i, i)
         time0 = time.time()
 
         # Sample random ray batch
