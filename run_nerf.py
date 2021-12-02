@@ -655,7 +655,7 @@ def train():
 
     parser = config_parser()
     args = parser.parse_args()
-    writer = SummaryWriter()
+    writer = SummaryWriter('runs/' + args.expname)
 
     if args.dataset_type == 'llff':
         if args.colmap_depth:
