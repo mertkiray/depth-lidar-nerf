@@ -457,11 +457,9 @@ def load_lidar_depth(basedir, factor=8, bd_factor=.75):
 
     for data in data_list:
         coord = data['coord'] / factor
-        data['coord'] = coord.astype(int)
+        data['coord'] = coord
         data['depth'] *= sc
         data['depth'] = (data['depth'] - np.min(data['depth'])) / (np.max(data['depth']) - np.min(data['depth']))
-
-    print(data_list[0]['depth'])
 
     return data_list
     

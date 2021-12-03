@@ -16,8 +16,8 @@ import open3d
 import matplotlib.pyplot as plt
 from PIL import Image
 
-from .loadCalibration import loadCalibrationCameraToPose, loadCalibrationRigid
-from .cameras import CameraPerspective, CameraFisheye
+from loadCalibration import loadCalibrationCameraToPose, loadCalibrationRigid
+from cameras import CameraPerspective, CameraFisheye
 from preprocess.KITTI360.utils import latlonToMercator, latToScale, postprocessPoses
 
 
@@ -129,7 +129,7 @@ class Kitti360Dataset(object):
         #get mask
         mask = self.get_mask(u, v, depth, camera)
 
-        coords = list(zip(v[mask], u[mask]))
+        coords = list(zip(u[mask], v[mask]))
         coords = np.array(coords)
         depth_arr = np.array(depth[mask])
 
