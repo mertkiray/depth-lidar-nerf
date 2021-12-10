@@ -45,3 +45,11 @@ def postprocessPoses(poses_in):
         poses.append(np.matmul(R, P.T).T)
 
     return poses
+
+
+def convertToHomogeneous(matrix):
+    matrix = np.concatenate((matrix, np.array([0., 0., 0., 1.]).reshape(1, 4)))
+    return matrix
+
+def convertFromHomogenous(matrix):
+    return matrix[:3,:4]

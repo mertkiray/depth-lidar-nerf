@@ -249,11 +249,11 @@ def get_rays(H, W, focal, c2w):
     j = j.t()
     # TODO: Changing this
     #original
-    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
+    #dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
 
     #to
 
-    #dirs = torch.stack([(i-W*.5)/focal, (j-H*.5)/focal, torch.ones_like(i)], -1)
+    dirs = torch.stack([(i-W*.5)/focal, (j-H*.5)/focal, torch.ones_like(i)], -1)
 
     # Rotate ray directions from camera frame to the world frame
     rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
@@ -266,11 +266,11 @@ def get_rays_np(H, W, focal, c2w):
     i, j = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32), indexing='xy') # i: H x W, j: H x W
     # TODO: Changing this
     #original
-    dirs = np.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -np.ones_like(i)], -1) # dirs: H x W x 3
+    #dirs = np.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -np.ones_like(i)], -1) # dirs: H x W x 3
 
     #to
 
-    #dirs = np.stack([(i-W*.5)/focal, (j-H*.5)/focal, np.ones_like(i)], -1) # dirs: H x W x 3
+    dirs = np.stack([(i-W*.5)/focal, (j-H*.5)/focal, np.ones_like(i)], -1) # dirs: H x W x 3
 
 
     # Rotate ray directions from camera frame to the world frame
@@ -281,8 +281,18 @@ def get_rays_np(H, W, focal, c2w):
 
 
 def get_rays_by_coord_np(H, W, focal, c2w, coords):
-    i, j = (coords[:,0]-W*0.5)/focal, -(coords[:,1]-H*0.5)/focal
-    dirs = np.stack([i,j,-np.ones_like(i)],-1)
+    # TODO: Changing this
+    # original
+    #i, j = (coords[:,0]-W*0.5)/focal, -(coords[:,1]-H*0.5)/focal
+
+    #dirs = np.stack([i,j,-np.ones_like(i)],-1)
+
+    # to
+
+    i, j = (coords[:, 0] - W * 0.5) / focal, (coords[:, 1] - H * 0.5) / focal
+    dirs = np.stack([i, j, np.ones_like(i)], -1)
+
+
     rays_d = np.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)
     rays_o = np.broadcast_to(c2w[:3,-1], np.shape(rays_d))
     return rays_o, rays_d

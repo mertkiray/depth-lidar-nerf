@@ -2,7 +2,10 @@ import numpy as np
 import os
 import imageio
 from pathlib import Path
-from read_write_model import *
+
+from matplotlib import pyplot as plt
+
+from .read_write_model import *
 
 
 def visualize_keypoints(basedir, factor=8, bd_factor=.75):
@@ -46,6 +49,60 @@ def visualize_keypoints(basedir, factor=8, bd_factor=.75):
    
     return 
 
+def visualize_depths_as_image(depth):
+    cm = plt.get_cmap('jet')
+    depthImage = cm(depth / depth.max())[..., :3]
+    depthImageWorld = cm((1 / (1 - depth)) / (1 / (1 - depth)).max())[..., :3]
+
+    return depthImage, depthImageWorld
+
+def visualize_depths_masked_uv(depth, coord_array):
+
+    print(coord_array.shape)
+    print('bacin')
+    depth_map = np.zeros((depth.shape[0], depth.shape[1]))
+    print(depth_map.shape)
+
+    for i, coord in enumerate(coord_array):
+        depth_map[int(coord[1]), int(coord[0])] = depth[int(coord[1]), int(coord[0])]
+
+    depth_map = np.ma.masked_where(depth_map == 0, depth_map)
+
+    cm = plt.get_cmap('jet')
+    cm.set_bad(color='black')
+    depthImage = cm(depth_map / depth_map.max())[..., :3]
+
+    return depthImage
+
+
+
+def visualize_depths_on_image(depth, image):
+
+    print(image.shape)
+
+    coord_array = np.array(depth['coord'])
+    depth_array = np.array(depth['depth'])
+    print(coord_array.shape)
+    depth_map = np.zeros((image.shape[0], image.shape[1]))
+
+    print(f'depth_map shape: {depth_map.shape}')
+
+    for i, coord in enumerate(coord_array):
+        depth_map[int(coord[1]), int(coord[0])] = depth_array[i]
+
+    depth_map = np.ma.masked_where(depth_map == 0, depth_map)
+
+    # color map for visualizing depth map
+    cm = plt.get_cmap('jet')
+    cm.set_bad(color='black')
+
+    colorImage = np.array(image)
+
+    print(f'color image shape : {colorImage.shape}')
+    depthImage = cm(depth_map / depth_map.max())[..., :3]
+    colorImage[depth_map > 0] = depthImage[depth_map > 0]
+
+    return depthImage, colorImage
 
 def main():
     visualize_keypoints("/data2/kangled/datasets/DSNeRF/dtu/scan21_all")

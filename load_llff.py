@@ -260,7 +260,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     # TODO: check this our rotation vs their rotation
     # our rotation   x = forward, y = left, z = up   change to "right up back"    right down forward  0 -1 -2
-    poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
+    #poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
 
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
@@ -270,7 +270,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     images = imgs
     bds = np.moveaxis(bds, -1, 0).astype(np.float32)
     print("bds:", bds[0])
-    
+
     # Rescale if bd_factor is provided
     sc = 1. if bd_factor is None else 1./(bds.min() * bd_factor)
     poses[:,:3,3] *= sc
@@ -332,6 +332,10 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
     
     images = images.astype(np.float32)
     poses = poses.astype(np.float32)
+
+    print('CCCCCCCCCCCCCCCCCCCCC')
+    print(poses[0])
+    print('CCCCCCCCCCCCCCCCCCCCC')
     return images, poses, bds, render_poses, i_test
 
 
@@ -448,18 +452,41 @@ def load_sensor_depth(basedir, factor=8, bd_factor=.75):
     np.save(data_file, data_list)
     return data_list
 
-def load_lidar_depth(basedir, factor=8, bd_factor=.75):
+def load_lidar_depth(basedir, hwf, factor=8, bd_factor=.75):
+    print(hwf)
     data_file = os.path.join(basedir, 'depth_gt.npy')
     data_list = np.load(data_file, allow_pickle=True)
 
-    _, bds_raw, _ = _load_data(basedir, factor=factor) # factor=8 downsamples original imgs by 8x
-    sc = 1. if bd_factor is None else 1./(bds_raw.min() * bd_factor)
+    _, bds_raw, _ = _load_data(basedir, factor=factor)  # factor=8 downsamples original imgs by 8x
+    bds_raw = np.moveaxis(bds_raw, -1, 0).astype(np.float32)
+    # print(bds_raw.shape)
+    # Rescale if bd_factor is provided
+    sc = 1. if bd_factor is None else 1. / (bds_raw.min() * bd_factor)
 
+
+    ## TODO: Maybe calculate as load_colmap_depth
     for data in data_list:
+        pass
         coord = data['coord'] / factor
+
+        # TODO: TURN COORDS INTO NDC ?
+        # coord[:, 0] = coord[:, 0] / hwf[1] * 2 - 1
+        # coord[:, 1] = coord[:, 1] / hwf[0] * 2 - 1
+        #
+        #
+        # print(coord[:, 0])
+        # print('==========')
+        # print(coord[:, 1])
+
         data['coord'] = coord
-        data['depth'] *= sc
-        data['depth'] = (data['depth'] - np.min(data['depth'])) / (np.max(data['depth']) - np.min(data['depth']))
+
+        data['depth'] = data['depth'] * sc
+
+        # TODO: ndc?
+        #data['depth'] = 1 - (1/data['depth'])
+
+        # TODO: normalize?
+        #data['depth'] = (data['depth'] - np.min(data['depth'])) / (np.max(data['depth']) - np.min(data['depth']))
 
     return data_list
     

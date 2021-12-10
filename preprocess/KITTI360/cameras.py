@@ -3,7 +3,7 @@ import numpy as np
 import re
 import yaml
 import sys
-from loadCalibration import loadCalibrationCameraToPose
+from preprocess.KITTI360.loadCalibration import loadCalibrationCameraToPose
 
 
 def readYAMLFile(fileName):

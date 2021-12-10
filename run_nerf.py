@@ -15,6 +15,7 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
+from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
 from run_nerf_helpers import *
 
 from load_llff import load_llff_data, load_lidar_depth
@@ -32,7 +33,7 @@ import cv2
 # import time
 
 # concate_time, iter_time, split_time, loss_time, backward_time = [], [], [], [], []
-
+from utils.visualization import visualize_depths_as_image, visualize_depths_on_image, visualize_depths_masked_uv
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.set_device(2)
@@ -170,7 +171,7 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
-def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, iteration=0, writer=None):
+def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, iteration=0, writer=None, coords=None):
 
     H, W, focal = hwf
 
@@ -212,9 +213,23 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             # imageio.imwrite(os.path.join(savedir, '{:03d}_depth.png'.format(i)), depth_color)
             imageio.imwrite(os.path.join(savedir, '{:03d}_depth.png'.format(i)), depth)
 
+
+            print('-----------------')
+            #print(gt_imgs.shape)
+            print('---------------')
+
             if writer:
+                depth_image, depth_image_world = visualize_depths_as_image(depth)
+
                 writer.add_image('Images/rgb', rgb8, iteration, dataformats='HWC')
                 writer.add_image('Images/depth', depth, iteration, dataformats='HW')
+                writer.add_image('Images/depth_image', depth_image, iteration, dataformats='HWC')
+                writer.add_image('Images/depth_image_world', depth_image_world, iteration, dataformats='HWC')
+
+                if coords is not None:
+                    masked_depth_image = visualize_depths_masked_uv(depth, coords)
+                    writer.add_image('Images/masked_depth_image', masked_depth_image, iteration, dataformats='HWC')
+
 
 
             np.savez(os.path.join(savedir, '{:03d}.npz'.format(i)), rgb=rgb.cpu().numpy(), disp=disp.cpu().numpy(), acc=acc.cpu().numpy(), depth=depth)
@@ -248,9 +263,9 @@ def render_test_ray(rays_o, rays_d, hwf, ndc, near, far, use_viewdirs, N_samples
 
     z_vals = z_vals.reshape([rays_o.shape[0], N_samples])
 
-    rgb, sigma, depth_maps, weights = sample_sigma(rays_o, rays_d, viewdirs, network, z_vals, network_query_fn)
+    rgb, sigma, depth_maps = sample_sigma(rays_o, rays_d, viewdirs, network, z_vals, network_query_fn)
 
-    return rgb, sigma, z_vals, depth_maps, weights
+    return rgb, sigma, z_vals, depth_maps
 
 
 def create_nerf(args):
@@ -656,14 +671,24 @@ def train():
     parser = config_parser()
     args = parser.parse_args()
     writer = SummaryWriter('runs/' + args.expname)
+    config_params = {}
+    for config in open(args.config):
+        dict = config.split('=')
+        if len(dict) == 2:
+            key, value = dict[0].strip().replace('\n' , ''), dict[1].strip().replace('\n' , '')
+            config_params[key] = value
+
+    writer.add_text('config',  str(config_params))
 
     if args.dataset_type == 'llff':
-        if args.colmap_depth:
-            depth_gts = load_lidar_depth(args.datadir, factor=args.factor, bd_factor=.75)
+
         images, poses, bds, render_poses, i_test = load_llff_data(args.datadir, args.factor,
                                                                   recenter=True, bd_factor=.75,
                                                                   spherify=args.spherify)
         hwf = poses[0,:3,-1]
+
+        if args.colmap_depth:
+            depth_gts = load_lidar_depth(args.datadir, hwf=hwf, factor=args.factor )
 
 
         poses = poses[:,:3,:4]
@@ -789,20 +814,139 @@ def train():
             print('test poses shape', render_poses.shape)
 
             if args.render_test_ray:
+                import pytransform3d.visualizer as pv
+                import pytransform3d.transformations as pt
+                dataset = Kitti360Dataset(kitti360Path='data/kitti/KITTI-360', seq=0)
+                print(i_train)
+
+                xxx = depth_gts[0]['coord']
+                print(f'coords: {xxx}')
+
                 # rays_o, rays_d = get_rays(H, W, focal, render_poses[0])
                 index_pose = i_train[0]
                 rays_o, rays_d = get_rays_by_coord_np(H, W, focal, poses[index_pose,:3,:4], depth_gts[index_pose]['coord'])
                 rays_o, rays_d = torch.Tensor(rays_o).to(device), torch.Tensor(rays_d).to(device)
-                rgb, sigma, z_vals, depth_maps, weights = render_test_ray(rays_o, rays_d, hwf, network=render_kwargs_test['network_fine'], **render_kwargs_test)
+                rgb, sigma, z_vals, depth_maps = render_test_ray(rays_o, rays_d, hwf, network=render_kwargs_test['network_fine'], **render_kwargs_test)
                 # sigma = sigma.reshape(H, W, -1).cpu().numpy()
                 # z_vals = z_vals.reshape(H, W, -1).cpu().numpy()
                 # np.savez(os.path.join(testsavedir, 'rays.npz'), rgb=rgb.cpu().numpy(), sigma=sigma.cpu().numpy(), z_vals=z_vals.cpu().numpy())
                 # visualize_sigma(sigma[0, :].cpu().numpy(), z_vals[0, :].cpu().numpy(), os.path.join(testsavedir, 'rays.png'))
-                for k in range(20):
-                    visualize_weights(weights[k*100, :].cpu().numpy(), z_vals[k*100, :].cpu().numpy(), os.path.join(testsavedir, f'rays_weights_%d.png' % k))
+                # for k in range(20):
+                #     visualize_weights(weights[k*100, :].cpu().numpy(), z_vals[k*100, :].cpu().numpy(), os.path.join(testsavedir, f'rays_weights_%d.png' % k))
                 print("colmap depth:", depth_gts[index_pose]['depth'][0])
                 print("Estimated depth:", depth_maps[0].cpu().numpy())
                 print(depth_gts[index_pose]['coord'])
+
+
+
+                pose_34 = poses[i_train[0], :, :]
+                pose = np.eye(4)
+                pose[:3, :4] = pose_34
+                print('[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]')
+                print(pose)
+                print('[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]')
+                print(pose.shape)
+                print('rays shape')
+                print(rays_d.shape)
+                print(rays_o.shape)
+                #
+                fig = pv.figure()
+
+                #pose = dataset.get_pose_of_frame(6290)
+                cam2world = pose
+                virtual_image_distance = 1
+
+                sensor_size = np.array([W, H])
+                intrinsic = [
+                    [focal, 0, sensor_size[0] / 2], [0, focal, sensor_size[1] / 2.0], [0, 0, 1]
+                ]
+                intrinsic_matrix = np.array(intrinsic)
+
+                fig.plot_transform(A2B=cam2world, strict_check=False)
+                fig.plot_camera(
+                    cam2world=cam2world, M=intrinsic_matrix, sensor_size=sensor_size,
+                    virtual_image_distance=virtual_image_distance)
+
+
+                #i = 1
+                print(rays_d.shape)
+                for i in range(500):
+                    i = i * 50
+                    ray_o = rays_o[i].cpu().numpy()
+                    ray_d = rays_d[i].cpu().numpy()
+
+                    fig.plot_vector(start=ray_o,
+                                     direction=ray_d,
+                                     c=(1.0, 0.5, 0.0))
+
+                    P = np.zeros((2, 3))
+                    colors = np.empty((2, 3))
+                    P[0] = ray_o
+
+                    # ray_o + (depth_gts[index_pose]['depth'][0] * rays_d)
+
+                    print(depth_gts[index_pose]['depth'][i])
+                    print(ray_o)
+                    print(ray_d)
+                    ray_x = [ray_o[0], ray_o[1], ray_o[2] * depth_gts[index_pose]['depth'][i]]
+                    print(ray_x)
+                    P[1] = ray_o + (depth_gts[index_pose]['depth'][i] * ray_d)
+                    #P[1] = ray_x
+                    colors[:, 0] = np.linspace(0, 1, len(colors))
+                    colors[:, 1] = np.linspace(0, 1, len(colors))
+                    fig.plot(P, [0,1,0])
+
+                 # fig.plot_transform(A2B=np.eye(4))
+
+                # default parameters of a camera in Blender
+
+
+                #
+                # # fig = pv.Figure()
+
+
+                #pcd = dataset.load_velodyne_data(6290)
+                #pcd = dataset.get_velodyne_points_in_camera_coord(pcd)
+
+                #pcd = dataset.load_velodyne_data(5930)
+                pcd = dataset.get_velodyne_points_visible_in_rec_camera(5930)
+
+                print(pcd[0])
+
+                pcd = pcd[:, :3]
+                print(pcd.shape)
+
+                print(f'rays_d : {rays_d}')
+
+                #fig.scatter(pcd, s=0.1)
+                pcd_our = open3d.geometry.PointCloud()
+                pcd_our.points = open3d.utility.Vector3dVector(pcd)
+                pcd_our.paint_uniform_color([1, 0, 0])
+
+                # Come to world
+                pcd_our.transform(pose)
+
+
+                fig.add_geometry(pcd_our)
+
+
+                #frame = fig.plot_basis(R=np.eye(3), s=0.5)
+
+
+                fig.view_init()
+                if "__file__" in globals():
+                    fig.show()
+                else:
+                    fig.save_image("__open3d_rendered_image.jpg")
+
+
+
+
+
+
+
+
+
             else:
                 rgbs, disps = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
                 print('Done rendering', testsavedir)
@@ -887,8 +1031,17 @@ def train():
 
     # Summary writers
     # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
-    
+
+    print('----------')
+    writer.add_image('ImagesGT/color_image_gt', images[i_test[0]].cpu().numpy(), 0, dataformats='HWC')
+    if args.colmap_depth:
+        depth_image_gt, depth_on_image_gt =  visualize_depths_on_image(depth_gts[i_test[0]], images[i_test[0]].cpu().numpy())
+        writer.add_image('ImagesGT/depth_image_gt', depth_image_gt, 0, dataformats='HWC')
+        writer.add_image('ImagesGT/depth_on_image_gt', depth_on_image_gt, 0, dataformats='HWC')
+
+
     start = start + 1
+
     for i in trange(start, N_iters):
         writer.add_scalar("Iteration", i, i)
         time0 = time.time()
@@ -1007,15 +1160,24 @@ def train():
 
 
         optimizer.zero_grad()
+
         img_loss = img2mse(rgb, target_s)
         depth_loss = 0
         if args.depth_loss:
+
+            #print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
+
+            #if not args.no_ndc:
+                #depth_col = 1/(1-depth_col)
+                #target_depth = 1 - (1/target_depth)
+
             # depth_loss = img2mse(depth_col, target_depth)
             if args.weighted_loss:
                 if not args.normalize_depth:
                     depth_loss = torch.mean(((depth_col - target_depth) ** 2) * ray_weights)
                 else:
-                    depth_loss = torch.mean((((depth_col - target_depth) / max_depth) ** 2) * ray_weights)
+                    #depth_loss = torch.mean((((depth_col - target_depth) / max_depth) ** 2) * ray_weights)
+                    depth_loss = torch.mean((((depth_col - target_depth) / torch.max(target_depth)) ** 2) * ray_weights)
             elif args.relative_loss:
                 depth_loss = torch.mean(((depth_col - target_depth) / (target_depth + 1e-16))**2)
             else:
@@ -1025,7 +1187,14 @@ def train():
             sigma_loss = extras_col['sigma_loss'].mean()
             # print(sigma_loss)
         trans = extras['raw'][...,-1]
-        loss = img_loss + args.depth_lambda * depth_loss + args.sigma_lambda * sigma_loss
+
+        decay_steps = args.lrate_decay * 1000
+        decay_rate = 0.1
+        depth_importance = decay_rate ** (global_step / decay_steps)
+        depth_importance = 1
+        writer.add_scalar("Train/depth_importance", depth_importance, i)
+
+        loss = img_loss + args.depth_lambda * depth_importance * depth_loss + args.sigma_lambda * sigma_loss
         psnr = mse2psnr(img_loss)
 
         # timer_loss = time.perf_counter()
@@ -1066,6 +1235,8 @@ def train():
         new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
         for param_group in optimizer.param_groups:
             param_group['lr'] = new_lrate
+
+        writer.add_scalar("lr", new_lrate, i)
         ################################
 
         dt = time.time()-time0
@@ -1105,8 +1276,12 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
             print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
+
+                coords = None
+                if args.colmap_depth:
+                    coords = depth_gts[i_test[0]]['coord']
                 rgbs, disps = render_path(torch.Tensor(poses[i_test]).to(device), hwf, args.chunk, render_kwargs_test,
-                                          gt_imgs=images[i_test], savedir=testsavedir, iteration=i, writer=writer)
+                                          gt_imgs=images[i_test], savedir=testsavedir, iteration=i, writer=writer, coords=coords)
             print('Saved test set')
 
             filenames = [os.path.join(testsavedir, '{:03d}.png'.format(k)) for k in range(len(i_test))]
@@ -1121,15 +1296,24 @@ def train():
 
         if i%args.i_print==0:
 
+
             if not args.depth_loss:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
+                print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
                 print_depth_loss = depth_loss * args.depth_lambda
                 writer.add_scalar("Train/depth_loss", print_depth_loss, i)
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} Depth Loss: {depth_loss.item()}")
+                print(f' depth_col: {depth_col[0]} []  target_depth: {target_depth[0]}')
 
             writer.add_scalar("Train/loss", loss, i)
+            if 'rgb0' in extras and not args.no_coarse:
+                writer.add_scalar("Train/img_loss0", img_loss0, i)
+
+            writer.add_scalar("Train/img_loss", img_loss, i)
+            writer.add_scalar("Train/loss", loss, i)
             writer.add_scalar("Train/psnr", psnr, i)
+
 
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())

@@ -73,7 +73,7 @@ def visualize_cameras(colored_camera_dicts, sphere_radius, dataset, camera_size=
             #W2C = np.array(camera_dict[img_name]['W2C']).reshape((4, 4))
             #C2W = np.linalg.inv(W2C)
 
-            C2W = dataset.get_pose_of_frame(img_name)
+            C2W = dataset.get_rec_cam0_to_world(img_name)
 
             #img_size = camera_dict[img_name]['img_size']
             frustums.append(get_camera_frustum(img_size, K, C2W, frustum_length=camera_size, color=color))
@@ -153,16 +153,16 @@ if __name__ == '__main__':
 
 
     sphere_radius = 100.
-    train_cam_dict = json.load(open('train_cam.json'))
+    #train_cam_dict = json.load(open('train_cam.json'))
     #test_cam_dict = json.load(open('test_cam.json'))
     #path_cam_dict = json.load(open('path_cam.json'))
     camera_size = 1
-    colored_camera_dicts = [([0, 0, 0], list),
+    colored_camera_dicts = [([1, 0, 0], list),
                             #([0, 0, 1], test_cam_dict),
                             #([1, 1, 0], path_cam_dict)
                             ]
 
-    geometry_file = os.path.join(base_dir, 'pcd_scene.ply')
+    geometry_file = os.path.join(base_dir, 'pcd_frustrum.ply')
     geometry_type = 'pointcloud'
 
     visualize_cameras(colored_camera_dicts, sphere_radius, dataset,

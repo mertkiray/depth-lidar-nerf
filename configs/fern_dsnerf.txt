@@ -1,4 +1,4 @@
-expname = test2
+expname = new_new
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -15,7 +15,7 @@ netchunk = 16384
 netdepth = 4
 
 i_testset = 1000
-i_video = 25000
+i_video = 10000
 N_iters = 100000
 
 factor=8
@@ -23,6 +23,6 @@ factor=8
 train_scene = [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19]
 test_scene = [10]
 no_ndc = True
-colmap_depth = False
-depth_loss = False
-depth_lambda = 0.1
+colmap_depth = True
+depth_loss = True
+depth_lambda = 0.01
