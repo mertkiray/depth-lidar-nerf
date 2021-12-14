@@ -260,7 +260,7 @@ def load_llff_data(basedir, factor=8, recenter=True, bd_factor=.75, spherify=Fal
 
     # TODO: check this our rotation vs their rotation
     # our rotation   x = forward, y = left, z = up   change to "right up back"    right down forward  0 -1 -2
-    #poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
+    poses = np.concatenate([poses[:, 0:1, :], -poses[:, 1:2, :], -poses[:, 2:3, :], poses[:, 3:, :]], 1) # [-u, r, -t] -> [r, u, -t]
 
 
     poses = np.moveaxis(poses, -1, 0).astype(np.float32)
