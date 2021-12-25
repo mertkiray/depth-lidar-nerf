@@ -185,14 +185,15 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
     disps = []
 
     t = time.time()
-    for i, c2w in enumerate(tqdm(render_poses)):
-        print(i, time.time() - t)
+    #for i, c2w in enumerate(tqdm(render_poses)):
+    for i , c2w in enumerate(render_poses):
+        #print(i, time.time() - t)
         t = time.time()
         rgb, disp, acc, depth, extras = render(H, W, focal, chunk=chunk, c2w=c2w[:3,:4], retraw=True, **render_kwargs)
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
-        if i==0:
-            print(rgb.shape, disp.shape)
+        #if i==0:
+        #    print(rgb.shape, disp.shape)
 
         """
         if gt_imgs is not None and render_factor==0:
