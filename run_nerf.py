@@ -15,6 +15,8 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
+from external_models import Vgg19, prepare_images_vgg19, visualize_features, unnormalize_image
+from external_models_resnet import Resnet
 from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
 from run_nerf_helpers import *
 
@@ -84,6 +86,26 @@ def batchify_rays(rays_flat, chunk=1024*32, **kwargs):
 
     all_ret = {k : torch.cat(all_ret[k], 0) for k in all_ret}
     return all_ret
+
+
+def batchify_rays_feature_loss(rays_flat, chunk=1024*32, keep_keys=None, **kwargs):
+    """Render rays in smaller minibatches to avoid OOM.
+    """
+    # ret_rgb_only = keep_keys and len(keep_keys) == 1 and keep_keys[0] == 'rgb_map'
+    all_ret = {}
+    for i in range(0, rays_flat.shape[0], chunk):
+        ret = render_rays(rays_flat[i:i+chunk], **kwargs)
+        for k in ret:
+            if keep_keys and k not in keep_keys:
+                # Don't save this returned value to save memory
+                continue
+            if k not in all_ret:
+                all_ret[k] = []
+            all_ret[k].append(ret[k])
+
+    all_ret = {k : torch.cat(all_ret[k], 0) for k in all_ret}
+    return all_ret
+
 
 
 def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
@@ -171,6 +193,77 @@ def render(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
     return ret_list + [ret_dict]
 
 
+def render_feature_loss(H, W, focal, chunk=1024*32, rays=None, c2w=None, ndc=True,
+                  near=0., far=1.,
+                  use_viewdirs=False, c2w_staticcam=None,
+                  keep_keys=None,
+                  **kwargs):
+    """Render rays
+    Args:
+      H: int. Height of image in pixels.
+      W: int. Width of image in pixels.
+      focal: float. Focal length of pinhole camera.
+      chunk: int. Maximum number of rays to process simultaneously. Used to
+        control maximum memory usage. Does not affect final results.
+      rays: array of shape [2, batch_size, 3]. Ray origin and direction for
+        each example in batch.
+      c2w: array of shape [3, 4]. Camera-to-world transformation matrix.
+      ndc: bool. If True, represent ray origin, direction in NDC coordinates.
+      near: float or array of shape [batch_size]. Nearest distance for a ray.
+      far: float or array of shape [batch_size]. Farthest distance for a ray.
+      use_viewdirs: bool. If True, use viewing direction of a point in space in model.
+      c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for
+       camera while using other c2w argument for viewing directions.
+    Returns:
+      rgb_map: [batch_size, 3]. Predicted RGB values for rays.
+      disp_map: [batch_size]. Disparity map. Inverse of depth.
+      acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
+      extras: dict with everything returned by render_rays().
+    """
+    if c2w is not None:
+        # special case to render full image
+        rays_o, rays_d = get_rays(H, W, focal, c2w)
+    else:
+        # use provided ray batch
+        rays_o, rays_d = rays
+
+    if use_viewdirs:
+        # provide ray directions as input
+        viewdirs = rays_d
+        if c2w_staticcam is not None:
+            # special case to visualize effect of viewdirs
+            rays_o, rays_d = get_rays(H, W, focal, c2w_staticcam)
+        viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
+        viewdirs = torch.reshape(viewdirs, [-1,3]).float()
+
+    sh = rays_d.shape # [..., 3]
+    if ndc:
+        # for forward facing scenes
+        rays_o, rays_d = ndc_rays(H, W, focal, 1., rays_o, rays_d)
+
+    # Create ray batch
+    rays_o = torch.reshape(rays_o, [-1,3]).float()
+    rays_d = torch.reshape(rays_d, [-1,3]).float()
+
+    near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
+    rays = torch.cat([rays_o, rays_d, near, far], -1)
+    if use_viewdirs:
+        rays = torch.cat([rays, viewdirs], -1)
+
+    # Render and reshape
+    all_ret = batchify_rays_feature_loss(rays, chunk, keep_keys=keep_keys, **kwargs)
+    for k in all_ret:
+        k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
+        all_ret[k] = torch.reshape(all_ret[k], k_sh)
+
+    k_extract = ['rgb_map', 'disp_map', 'acc_map']
+    if keep_keys:
+        k_extract = [k for k in k_extract if k in keep_keys]
+    ret_list = [all_ret[k] for k in k_extract]
+    ret_dict = {k : all_ret[k] for k in all_ret}
+    return ret_list + [ret_dict]
+
+
 def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=None, render_factor=0, iteration=0, writer=None, coords=None):
 
     H, W, focal = hwf
@@ -215,9 +308,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             imageio.imwrite(os.path.join(savedir, '{:03d}_depth.png'.format(i)), depth)
 
 
-            print('-----------------')
-            #print(gt_imgs.shape)
-            print('---------------')
 
             if writer:
                 depth_image, depth_image_world = visualize_depths_as_image(depth)
@@ -664,6 +754,14 @@ def config_parser():
                     help="normalize depth before calculating loss")
     parser.add_argument("--depth_rays_prop", type=float, default=0.5,
                         help="Proportion of depth rays.")
+    parser.add_argument("--feature_loss", action='store_true',
+                        help="Use feature loss VGG or not.")
+    parser.add_argument("--feature_start_iteration", type=int, default=1000,
+                        help="Start of feature loss iteration")
+    parser.add_argument("--feature_loss_every_n", type=int, default=15,
+                        help="Calculate feature loss every n iteration")
+    parser.add_argument("--feature_lambda", type=float, default=0.1,
+                        help="Feature loss lambda")
     return parser
 
 
@@ -714,6 +812,11 @@ def train():
         else:
             i_train = np.array([i for i in args.train_scene if
                         (i not in i_test and i not in i_val)])
+
+        # #TODO: For overfit content try delete after:
+        #i_train = np.array([0])
+        #i_test = np.array([0])
+        #i_val = np.array([0])
 
         print('DEFINING BOUNDS')
         if args.no_ndc:
@@ -1041,6 +1144,29 @@ def train():
         writer.add_image('ImagesGT/depth_on_image_gt', depth_on_image_gt, 0, dataformats='HWC')
 
 
+    #TODO: vgg19 creation
+    feature_model = Vgg19()
+    #feature_model = Resnet(output_layer='layer1')
+    feature_model = feature_model.to(device)
+
+    # with torch.no_grad():
+    #     normalized_training_images = prepare_images_vgg19(images[i_train])
+    #     features = feature_model(normalized_training_images)
+    #     # B, F, W, H
+    #     # gt_content_features.shape = torch.Size([19, 512, 5, 22]
+    #     gt_content_features_1_1 = features['conv1_1']
+    #     gt_content_features_1_2 = features['conv1_2']
+
+        # gt_content_features_1_1 = gt_content_features_1_1.to(device)
+        # gt_content_features_1_2 = gt_content_features_1_2.to(device)
+        #visualize_features(gt_content_features)
+
+    # Ground Truth mean/std
+    # mean = (0.485, 0.456, 0.406)
+    # std = (0.229, 0.224, 0.225)
+
+
+
     start = start + 1
 
     for i in trange(start, N_iters):
@@ -1159,17 +1285,32 @@ def train():
 
 
 
+        # layer_count = 0
+        # for parm in render_kwargs_train['network_fine'].parameters():
+        #     if parm.grad is not None:
+        #         writer.add_histogram('NERF/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+        #     layer_count += 1
+
+
+        # ## TODO: Close this while not experimenting this slows things down
+        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+        #     layer_count = 0
+        #     for parm in render_kwargs_train['network_fine'].parameters():
+        #         if parm.grad is not None:
+        #             writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+        #         layer_count += 1
 
         optimizer.zero_grad()
 
         img_loss = img2mse(rgb, target_s)
+        psnr = mse2psnr(img_loss)
         depth_loss = 0
         if args.depth_loss:
 
             #print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
 
-            #if not args.no_ndc:
-                #depth_col = 1/(1-depth_col)
+            if not args.no_ndc:
+                depth_col = 1/(1-depth_col)
                 #target_depth = 1 - (1/target_depth)
 
             # depth_loss = img2mse(depth_col, target_depth)
@@ -1193,18 +1334,109 @@ def train():
         decay_rate = 0.1
         depth_importance = decay_rate ** (global_step / decay_steps)
         depth_importance = 1
-        writer.add_scalar("Train/depth_importance", depth_importance, i)
+        #writer.add_scalar("Train/depth_importance", depth_importance, i)
 
         loss = img_loss + args.depth_lambda * depth_importance * depth_loss + args.sigma_lambda * sigma_loss
-        psnr = mse2psnr(img_loss)
 
+
+
+        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+            # TODO: RENDER AN IMAGE AND CALCULATE SEMANTIC LOSS
+            img_semantic_id = random.choice(i_train)
+            #img_semantic_idx = np.where(i_train == img_semantic_id)
+            #img_semantic_id = [img_semantic_id]
+
+
+
+            # TODO: CHECK THIS
+            with torch.no_grad():
+                feature_pose = poses[img_semantic_id, :3, :4].squeeze(0)
+
+                ## PIXEL SPACE BETWEEN RAYS   - W/nW    175/32 = 5.blablabla
+                nH = 48
+                nW = 64
+                feature_rays_o, feature_rays_d, start_w, end_w, start_h, end_h = get_rays_cropped_feature_loss(H, W, focal, c2w=feature_pose, nH=nH, nW=nW)
+
+                gt_image_new = images[img_semantic_id]
+                gt_image_new = gt_image_new[start_h:end_h+1, start_w:end_w+1]
+                #print(f'CROPPED HEIGHT: {start_h, end_h+1}')
+                #print(f'CROPPED WIDTH: {start_w, end_w+1}')
+                gt_image_new = gt_image_new[None, ...]
+                gt_image_new = gt_image_new.permute(0, 3, 1, 2)
+                #print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
+                gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
+
+                ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
+                #print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
+                gt_image_features_new = feature_model(gt_image_normalized_new)
+
+                if i % args.i_print == 0:
+                    print_image_gt = gt_image_new.permute(0, 2, 3 , 1)
+                    #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
+                    writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
+
+
+            consistency_keep_keys = ['rgb_map', 'rgb0']
+            extras_feature_loss = render_feature_loss(H, W, focal, chunk=args.chunk,
+                            rays=(feature_rays_o.to(device), feature_rays_d.to(device)),
+                            keep_keys=consistency_keep_keys,
+                            **render_kwargs_train)[-1]
+            # rgb0 is the rendering from the coarse network, while rgb_map uses the fine network
+            if args.N_importance > 0:
+                rgbs = torch.stack([extras_feature_loss['rgb_map'], extras_feature_loss['rgb0']], dim=0)
+            else:
+                rgbs = extras_feature_loss['rgb_map'].unsqueeze(0)
+                #print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
+            rgbs = rgbs.permute(0, 3, 1, 2).clamp(0, 1)
+
+
+            #rgbs_resize_c = F.interpolate(rgbs, size=(H, W),
+            #                              mode='bilinear')
+
+            #print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
+            normalized_rgbs_nerf = prepare_images_vgg19(rgbs)
+            #print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+
+            if i % args.i_print == 0:
+                print_rgbs_nerf = rgbs.permute(0, 2, 3, 1)
+                #print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
+                writer.add_image('Images/rgb_interpolated', print_rgbs_nerf[0], i, dataformats='HWC')
+                writer.add_image('Images/rgb_interpolated0', print_rgbs_nerf[1], i, dataformats='HWC')
+
+
+            #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+            features_rgbs = feature_model(normalized_rgbs_nerf)
+
+            content_features_1_1 = features_rgbs['conv1_1']
+            content_features_1_2 = features_rgbs['conv1_2']
+
+            # if i == 250:
+            #     visualize_features(content_features.detach())
+
+            #feature_loss = torch.mean((features_rgbs[0] - gt_image_features_new)**2)
+            feature_loss = torch.mean((content_features_1_1[0] - gt_image_features_new['conv1_1'])**2)
+            feature_loss = feature_loss + torch.mean((content_features_1_2[0] - gt_image_features_new['conv1_2'])**2)
+
+            feature_loss0 = 0
+            if args.N_importance > 0:
+                #feature_loss0 = feature_loss0 + torch.mean((features_rgbs[1] - gt_image_features_new)**2)
+                feature_loss0 = torch.mean((content_features_1_1[1] - gt_image_features_new['conv1_1'])**2)
+                feature_loss0 = feature_loss0 + torch.mean((content_features_1_2[1] - gt_image_features_new['conv1_2'])**2)
+            feature_loss = feature_loss + feature_loss0
+
+
+            loss = loss + feature_loss * args.feature_lambda
         # timer_loss = time.perf_counter()
 
-        ## TODO: What is this?
+        # TODO: What is this?
         if 'rgb0' in extras and not args.no_coarse:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             loss = loss + img_loss0
             psnr0 = mse2psnr(img_loss0)
+
+        # # #TODO: Only for testing for now
+        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+            loss = feature_loss + feature_loss0
 
         loss.backward()
         optimizer.step()
@@ -1297,7 +1529,8 @@ def train():
 
         if i%args.i_print==0:
 
-
+            if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+                writer.add_scalar("Train/feature_loss", feature_loss, i)
             if not args.depth_loss:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
@@ -1310,6 +1543,9 @@ def train():
             writer.add_scalar("Train/loss", loss, i)
             if 'rgb0' in extras and not args.no_coarse:
                 writer.add_scalar("Train/img_loss0", img_loss0, i)
+                if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+                    writer.add_scalar("Train/feature_loss0", feature_loss0, i)
+
 
             writer.add_scalar("Train/img_loss", img_loss, i)
             writer.add_scalar("Train/loss", loss, i)

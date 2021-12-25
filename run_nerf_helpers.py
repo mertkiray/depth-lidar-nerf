@@ -71,7 +71,7 @@ def get_embedder(multires, i=0):
 
 # Model
 class NeRF(nn.Module):
-    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=4, skips=[4], use_viewdirs=False):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=5, skips=[4], use_viewdirs=False):
         """ 
         """
         super(NeRF, self).__init__()
@@ -316,6 +316,95 @@ def ndc_rays(H, W, focal, near, rays_o, rays_d):
     
     return rays_o, rays_d
 
+
+# Ray helpers
+_printed_get_rays = True
+def get_rays_feature_loss(H, W, focal, c2w, nH=None, nW=None, jitter=False):
+    # nH and nW specify the number of rays for rows and columns of the rendered image, respectively
+    # By setting nH < H or nW < W, we can render a smaller image that stretches the full
+    # content extent of the scene
+    if nH is None:
+        nH = H
+    if nW is None:
+        nW = W
+
+    if jitter:
+        # Perturb query points
+        dW = W // nW
+        # start_W = np.random.randint(low=0, high=W % nW + 1)
+        start_W = np.random.uniform(low=0, high=W % nW)
+        end_W = start_W + (nW - 1) * dW
+        pts_W = torch.arange(start=start_W, end=end_W+1, step=dW)
+
+        dH = H // nH
+        # start_H = np.random.randint(low=0, high=H % nH + 1)
+        start_H = np.random.uniform(low=0, high=H % nH)
+        end_H = start_H + (nH - 1) * dH
+        pts_H = torch.arange(start=start_H, end=end_H+1, step=dH)
+
+        global _printed_get_rays
+        if _printed_get_rays:
+            print('get_rays H', H)
+            print('get_rays W', W)
+            print('start W', start_W)
+            print('end_W W', end_W)
+            print('start_H', start_H)
+            print('end_H', end_H)
+            #print('get_rays nH nW', nH, nW)
+            #print('get_rays pts_W', pts_W)
+            #print('get_rays pts_H', pts_H)
+            #_printed_get_rays = False
+    else:
+        pts_W = torch.linspace(0, W-1, nW)
+        pts_H = torch.linspace(0, H-1, nH)
+    i, j = torch.meshgrid(pts_W, pts_H)  # pytorch's meshgrid has indexing='ij'
+    i = i.t()
+    j = j.t()
+    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
+    # Rotate ray directions from camera frame to the world frame
+    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+    rays_o = c2w[:3,-1].expand(rays_d.shape)
+    return rays_o, rays_d
+
+
+
+
+# Ray helpers
+_printed_cropped_get_rays = True
+def get_rays_cropped_feature_loss(H, W, focal, c2w, nH=32, nW=64):
+    # nH and nW specify the number of rays for rows and columns of the rendered image, respectively
+    # By setting nH < H or nW < W, we can render a smaller image that stretches the full
+    # content extent of the scene
+    num_w = W - nW + 1
+    num_h = H - nH + 1
+
+    #print(num_w)
+    #print(num_h)
+
+    start_w = np.random.randint(0, num_w - 1)
+    start_h = np.random.randint(0, num_h - 1)
+
+    end_w = start_w + nW - 1
+    end_h = start_h + nH - 1
+
+
+
+    pts_W = torch.linspace(start_w, end_w, nW)
+    pts_H = torch.linspace(start_h, end_h, nH)
+
+    #print(f'NERF PTS W: {pts_W}')
+    #print(f'NERF PTS H: {pts_H}')
+
+    i, j = torch.meshgrid(pts_W, pts_H)  # pytorch's meshgrid has indexing='ij'
+    i = i.t()
+    j = j.t()
+    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
+    # Rotate ray directions from camera frame to the world frame
+    rays_d = torch.sum(dirs[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+    rays_o = c2w[:3,-1].expand(rays_d.shape)
+    return rays_o, rays_d, start_w, end_w, start_h, end_h
 
 # Hierarchical sampling (section 5.2)
 def sample_pdf(bins, weights, N_samples, det=False, pytest=False):

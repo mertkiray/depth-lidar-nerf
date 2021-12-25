@@ -1,4 +1,4 @@
-expname = all_together
+expname = witVGGfactor2
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -15,10 +15,10 @@ netchunk = 16384
 netdepth = 4
 
 i_testset = 1000
-i_video = 10000
+i_video = 50000
 N_iters = 50000
 
-factor=4
+factor=2
 
 train_scene = [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19]
 test_scene = [10]
