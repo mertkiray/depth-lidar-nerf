@@ -1353,12 +1353,12 @@ def train():
                 feature_pose = poses[img_semantic_id, :3, :4].squeeze(0)
 
                 ## PIXEL SPACE BETWEEN RAYS   - W/nW    175/32 = 5.blablabla
-                nH = 48
-                nW = 64
+                nH = 32
+                nW = 32
                 feature_rays_o, feature_rays_d, start_w, end_w, start_h, end_h = get_rays_cropped_feature_loss(H, W, focal, c2w=feature_pose, nH=nH, nW=nW)
 
                 gt_image_new = images[img_semantic_id]
-                gt_image_new = gt_image_new[start_h:end_h+1, start_w:end_w+1]
+                #gt_image_new = gt_image_new[start_h:end_h+1, start_w:end_w+1]
                 #print(f'CROPPED HEIGHT: {start_h, end_h+1}')
                 #print(f'CROPPED WIDTH: {start_w, end_w+1}')
                 gt_image_new = gt_image_new[None, ...]
@@ -1390,6 +1390,51 @@ def train():
             rgbs = rgbs.permute(0, 3, 1, 2).clamp(0, 1)
 
 
+
+
+
+
+            with torch.no_grad():
+
+                #gt_feature_rays_o, gt_feature_rays_d = get_rays_cropped_feature_loss_gt(H, W, focal, c2w=feature_pose, start_w=start_w, end_w=end_w, start_h=start_h, end_h=end_h)
+
+                no_grad_extras = render_feature_loss(H, W, focal, chunk=args.chunk,
+                                                     c2w=poses[img_semantic_id],
+                                                     keep_keys=consistency_keep_keys,
+                                                     **render_kwargs_train)[-1]
+                # rgb0 is the rendering from the coarse network, while rgb_map uses the fine network
+                if args.N_importance > 0:
+                    no_grad_rgbs = torch.stack([no_grad_extras['rgb_map'], no_grad_extras['rgb0']], dim=0)
+                else:
+                    no_grad_rgbs = no_grad_extras['rgb_map'].unsqueeze(0)
+                    # print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
+                no_grad_rgbs = no_grad_rgbs.permute(0, 3, 1, 2).clamp(0, 1)
+
+                # start_w, end_w, start_h, end_h
+                mask = torch.ones(no_grad_rgbs.data.size())
+                mask[:, :, start_h:end_h + 1, start_w:end_w + 1] = 0
+
+                if i % args.i_print == 0:
+                    asd = mask.permute(0, 2, 3, 1)
+                    writer.add_image('Images/maskk', asd[0], i, dataformats='HWC')
+
+                no_grad_rgbs = no_grad_rgbs * mask
+
+                if i % args.i_print == 0:
+                    print_rgbs_nerf = no_grad_rgbs.permute(0, 2, 3, 1)
+                    # print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
+                    writer.add_image('Images/no_grad_image', print_rgbs_nerf[0], i, dataformats='HWC')
+                    writer.add_image('Images/no_grad_image0', print_rgbs_nerf[1], i, dataformats='HWC')
+
+            with torch.enable_grad():
+                no_grad_rgbs[:, :, start_h:end_h + 1, start_w:end_w + 1] = rgbs
+                rgbs = no_grad_rgbs
+
+
+
+
+
+
             #rgbs_resize_c = F.interpolate(rgbs, size=(H, W),
             #                              mode='bilinear')
 
@@ -1402,6 +1447,10 @@ def train():
                 #print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
                 writer.add_image('Images/rgb_interpolated', print_rgbs_nerf[0], i, dataformats='HWC')
                 writer.add_image('Images/rgb_interpolated0', print_rgbs_nerf[1], i, dataformats='HWC')
+
+
+
+
 
 
             #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
@@ -1424,7 +1473,7 @@ def train():
                 feature_loss0 = feature_loss0 + torch.mean((content_features_1_2[1] - gt_image_features_new['conv1_2'])**2)
             feature_loss = feature_loss + feature_loss0
 
-
+            #TODO: open for feature loss
             loss = loss + feature_loss * args.feature_lambda
         # timer_loss = time.perf_counter()
 
@@ -1435,8 +1484,8 @@ def train():
             psnr0 = mse2psnr(img_loss0)
 
         # # #TODO: Only for testing for now
-        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-            loss = feature_loss + feature_loss0
+        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+        #     loss = feature_loss + feature_loss0
 
         loss.backward()
         optimizer.step()
@@ -1530,7 +1579,7 @@ def train():
         if i%args.i_print==0:
 
             if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-                writer.add_scalar("Train/feature_loss", feature_loss, i)
+                writer.add_scalar("Train/feature_loss", feature_loss * args.feature_lambda, i)
             if not args.depth_loss:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
@@ -1544,7 +1593,7 @@ def train():
             if 'rgb0' in extras and not args.no_coarse:
                 writer.add_scalar("Train/img_loss0", img_loss0, i)
                 if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-                    writer.add_scalar("Train/feature_loss0", feature_loss0, i)
+                    writer.add_scalar("Train/feature_loss0", feature_loss0 * args.feature_lambda, i)
 
 
             writer.add_scalar("Train/img_loss", img_loss, i)
