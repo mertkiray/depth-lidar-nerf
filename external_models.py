@@ -55,7 +55,6 @@ class Vgg19(torch.nn.Module):
 def prepare_images_vgg19(image_batch):
     normalize = transforms.Normalize((0.485, 0.456, 0.406),
                          (0.229, 0.224, 0.225))
-    #cropped_imamges = crop(image_batch)
     normalized_images = normalize(image_batch)
     return normalized_images
 

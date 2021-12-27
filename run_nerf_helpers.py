@@ -406,6 +406,73 @@ def get_rays_cropped_feature_loss(H, W, focal, c2w, nH=32, nW=64):
     rays_o = c2w[:3,-1].expand(rays_d.shape)
     return rays_o, rays_d, start_w, end_w, start_h, end_h
 
+
+def get_rays_cropped_feature_loss_new(H, W, focal, c2w, nH=32, nW=32, gradH=2, gradW=2):
+    # nH and nW specify the number of rays for rows and columns of the rendered image, respectively
+    # By setting nH < H or nW < W, we can render a smaller image that stretches the full
+    # content extent of the scene
+    num_w = W - nW + 1
+    num_h = H - nH + 1
+
+    start_w = np.random.randint(0, num_w)
+    start_h = np.random.randint(0, num_h)
+
+    end_w = start_w + nW - 1
+    end_h = start_h + nH - 1
+
+    # print(f'Start W: {start_w}, End W: {end_w}')
+    # print(f'Start H: {start_h}, End H: {end_h}')
+
+    pts_W = torch.linspace(start_w, end_w, nW)
+    pts_H = torch.linspace(start_h, end_h, nH)
+
+    # print(f'NERF PTS W: {pts_W}')
+    # print(f'NERF PTS W SHAPE: {pts_W.shape}')
+    # print(f'NERF PTS H: {pts_H}')
+    # print(f'NERF PTS H SHAPE: {pts_H.shape}')
+
+
+
+    # RAY CREATION FOR =======NO GRAD======= PIXELS
+    i, j = torch.meshgrid(pts_W, pts_H)  # pytorch's meshgrid has indexing='ij'
+    i = i.t()
+    j = j.t()
+
+
+    dirs = torch.stack([(i-W*.5)/focal, -(j-H*.5)/focal, -torch.ones_like(i)], -1)
+    dirs = dirs.reshape(-1,3)
+
+    coords = torch.stack([(j-start_h), (i-start_w)], -1)
+    coords = coords.reshape(-1,2)
+
+    all_rand_indices = torch.randperm(len(coords))
+
+    grad_indices = all_rand_indices[:gradH * gradW]
+
+    grad_points = coords[grad_indices].type(torch.LongTensor).to(grad_indices.device)
+
+
+    dirs_grad = dirs[grad_indices]
+
+    # Rotate ray directions from camera frame to the world frame
+    grad_rays_d = torch.sum(dirs_grad[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+    grad_rays_o = c2w[:3,-1].expand(grad_rays_d.shape)
+
+
+    no_grad_indices = all_rand_indices[gradH * gradW:]
+    no_grad_points = coords[no_grad_indices].type(torch.LongTensor).to(no_grad_indices.device)
+
+    dirs_no_grad = dirs[no_grad_indices]
+
+    # Rotate ray directions from camera frame to the world frame
+    no_grad_rays_d = torch.sum(dirs_no_grad[..., np.newaxis, :] * c2w[:3,:3], -1)  # dot product, equals to: [c2w.dot(dir) for dir in dirs]
+    # Translate camera frame's origin to the world frame. It is the origin of all rays.
+    no_grad_rays_o = c2w[:3,-1].expand(no_grad_rays_d.shape)
+
+
+    return [grad_rays_o, grad_rays_d, grad_points], [no_grad_rays_o, no_grad_rays_d, no_grad_points], [start_w, end_w, start_h, end_h]
+
 # Hierarchical sampling (section 5.2)
 def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     # Get pdf

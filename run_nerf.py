@@ -40,6 +40,7 @@ from utils.visualization import visualize_depths_as_image, visualize_depths_on_i
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.set_device(2)
 np.random.seed(0)
+#torch.manual_seed(0)
 DEBUG = False
 
 from torch.utils.tensorboard import SummaryWriter
@@ -762,6 +763,15 @@ def config_parser():
                         help="Calculate feature loss every n iteration")
     parser.add_argument("--feature_lambda", type=float, default=0.1,
                         help="Feature loss lambda")
+    parser.add_argument("--nH", type=int, default=32,
+                        help="Height of total image for feature loss")
+    parser.add_argument("--nW", type=int, default=32,
+                        help="Width of total image for feature loss")
+    parser.add_argument("--gradH", type=int, default=16,
+                        help="Height of grad image for feature loss Total ray grad = gradH * gradW")
+    parser.add_argument("--gradW", type=int, default=16,
+                        help="Width of grad image for feature loss Total ray grad = gradH * gradW")
+
     return parser
 
 
@@ -1165,7 +1175,7 @@ def train():
     # mean = (0.485, 0.456, 0.406)
     # std = (0.229, 0.224, 0.225)
 
-
+    consistency_keep_keys = ['rgb_map', 'rgb0']
 
     start = start + 1
 
@@ -1293,12 +1303,12 @@ def train():
 
 
         # ## TODO: Close this while not experimenting this slows things down
-        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-        #     layer_count = 0
-        #     for parm in render_kwargs_train['network_fine'].parameters():
-        #         if parm.grad is not None:
-        #             writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
-        #         layer_count += 1
+        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+            layer_count = 0
+            for parm in render_kwargs_train['network_fine'].parameters():
+                if parm.grad is not None:
+                    writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+                layer_count += 1
 
         optimizer.zero_grad()
 
@@ -1349,108 +1359,93 @@ def train():
 
 
             # TODO: CHECK THIS
-            with torch.no_grad():
-                feature_pose = poses[img_semantic_id, :3, :4].squeeze(0)
+            feature_pose = poses[img_semantic_id, :3, :4].squeeze(0)
 
-                ## PIXEL SPACE BETWEEN RAYS   - W/nW    175/32 = 5.blablabla
-                nH = 32
-                nW = 32
-                feature_rays_o, feature_rays_d, start_w, end_w, start_h, end_h = get_rays_cropped_feature_loss(H, W, focal, c2w=feature_pose, nH=nH, nW=nW)
+            ## PIXEL SPACE BETWEEN RAYS   - W/nW    175/32 = 5.blablabla
 
-                gt_image_new = images[img_semantic_id]
-                #gt_image_new = gt_image_new[start_h:end_h+1, start_w:end_w+1]
-                #print(f'CROPPED HEIGHT: {start_h, end_h+1}')
-                #print(f'CROPPED WIDTH: {start_w, end_w+1}')
-                gt_image_new = gt_image_new[None, ...]
-                gt_image_new = gt_image_new.permute(0, 3, 1, 2)
-                #print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
-                gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
+            grad_rays, no_grad_rays, gt_coords = get_rays_cropped_feature_loss_new(H, W, focal, c2w=feature_pose,
+                                                                                   nH=args.nH, nW=args.nW,
+                                                                                   gradH=args.gradH, gradW=args.gradW)
+            # print(grad)
+            # print(no_grad)
+            # print(gt_coords)
 
-                ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
-                #print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
-                gt_image_features_new = feature_model(gt_image_normalized_new)
+            gt_image_new = images[img_semantic_id]
+            gt_image_new = gt_image_new[gt_coords[2]:gt_coords[3] + 1, gt_coords[0]:gt_coords[1] + 1]
+            gt_image_new = gt_image_new[None, ...]
+            gt_image_new = gt_image_new.permute(0, 3, 1, 2)
+            #print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
+            gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
 
-                if i % args.i_print == 0:
-                    print_image_gt = gt_image_new.permute(0, 2, 3 , 1)
-                    #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
-                    writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
+            ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
+            #print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
+            gt_image_features_new = feature_model(gt_image_normalized_new)
+
+            if i % args.i_print == 0:
+                print_image_gt = gt_image_new.permute(0, 2, 3 , 1)
+                #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
+                writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
 
 
-            consistency_keep_keys = ['rgb_map', 'rgb0']
-            extras_feature_loss = render_feature_loss(H, W, focal, chunk=args.chunk,
-                            rays=(feature_rays_o.to(device), feature_rays_d.to(device)),
+            grad_extras_feature_loss = render_feature_loss(H, W, focal, chunk=args.chunk,
+                            rays=(grad_rays[0].to(device), grad_rays[1].to(device)),
                             keep_keys=consistency_keep_keys,
                             **render_kwargs_train)[-1]
             # rgb0 is the rendering from the coarse network, while rgb_map uses the fine network
             if args.N_importance > 0:
-                rgbs = torch.stack([extras_feature_loss['rgb_map'], extras_feature_loss['rgb0']], dim=0)
+                rgbs = torch.stack([grad_extras_feature_loss['rgb_map'], grad_extras_feature_loss['rgb0']], dim=0)
             else:
-                rgbs = extras_feature_loss['rgb_map'].unsqueeze(0)
+                rgbs = grad_extras_feature_loss['rgb_map'].unsqueeze(0)
                 #print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
-            rgbs = rgbs.permute(0, 3, 1, 2).clamp(0, 1)
-
-
-
-
-
+            rgbs = rgbs.permute(0,2,1)
 
             with torch.no_grad():
 
-                #gt_feature_rays_o, gt_feature_rays_d = get_rays_cropped_feature_loss_gt(H, W, focal, c2w=feature_pose, start_w=start_w, end_w=end_w, start_h=start_h, end_h=end_h)
-
-                no_grad_extras = render_feature_loss(H, W, focal, chunk=args.chunk,
-                                                     c2w=poses[img_semantic_id],
-                                                     keep_keys=consistency_keep_keys,
-                                                     **render_kwargs_train)[-1]
+                no_grad_extras_feature_loss = render_feature_loss(H, W, focal, chunk=args.chunk,
+                                                          rays=(no_grad_rays[0].to(device), no_grad_rays[1].to(device)),
+                                                          keep_keys=consistency_keep_keys,
+                                                          **render_kwargs_train)[-1]
                 # rgb0 is the rendering from the coarse network, while rgb_map uses the fine network
                 if args.N_importance > 0:
-                    no_grad_rgbs = torch.stack([no_grad_extras['rgb_map'], no_grad_extras['rgb0']], dim=0)
+                    no_grad_rgbs = torch.stack([no_grad_extras_feature_loss['rgb_map'], no_grad_extras_feature_loss['rgb0']], dim=0)
                 else:
-                    no_grad_rgbs = no_grad_extras['rgb_map'].unsqueeze(0)
+                    no_grad_rgbs = no_grad_extras_feature_loss['rgb_map'].unsqueeze(0)
                     # print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
-                no_grad_rgbs = no_grad_rgbs.permute(0, 3, 1, 2).clamp(0, 1)
+                no_grad_rgbs = no_grad_rgbs.permute(0,2,1)
 
-                # start_w, end_w, start_h, end_h
-                mask = torch.ones(no_grad_rgbs.data.size())
-                mask[:, :, start_h:end_h + 1, start_w:end_w + 1] = 0
 
-                if i % args.i_print == 0:
-                    asd = mask.permute(0, 2, 3, 1)
-                    writer.add_image('Images/maskk', asd[0], i, dataformats='HWC')
+            im_shape = list(gt_image_new.data.size())
 
-                no_grad_rgbs = no_grad_rgbs * mask
+            grad_positions = grad_rays[2]
+            no_grad_positions = no_grad_rays[2]
+            im_shape[0] = no_grad_rgbs.shape[0]
 
-                if i % args.i_print == 0:
-                    print_rgbs_nerf = no_grad_rgbs.permute(0, 2, 3, 1)
-                    # print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
-                    writer.add_image('Images/no_grad_image', print_rgbs_nerf[0], i, dataformats='HWC')
-                    writer.add_image('Images/no_grad_image0', print_rgbs_nerf[1], i, dataformats='HWC')
+            mask = torch.rand(im_shape)
+            acc_rgb = torch.empty(im_shape)
 
+            mask[:,:, grad_positions[...,0], grad_positions[...,1]] =1
+            mask[:,:, no_grad_positions[...,0], no_grad_positions[...,1]] = 0
+
+
+
+            acc_rgb[:, :, no_grad_positions[..., 0], no_grad_positions[..., 1]] = no_grad_rgbs
             with torch.enable_grad():
-                no_grad_rgbs[:, :, start_h:end_h + 1, start_w:end_w + 1] = rgbs
-                rgbs = no_grad_rgbs
-
-
-
-
-
+                acc_rgb[:, :, grad_positions[..., 0], grad_positions[..., 1]] = rgbs
 
             #rgbs_resize_c = F.interpolate(rgbs, size=(H, W),
             #                              mode='bilinear')
 
             #print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
-            normalized_rgbs_nerf = prepare_images_vgg19(rgbs)
+            normalized_rgbs_nerf = prepare_images_vgg19(acc_rgb)
             #print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
 
             if i % args.i_print == 0:
-                print_rgbs_nerf = rgbs.permute(0, 2, 3, 1)
+                print_rgbs_nerf = acc_rgb.permute(0, 2, 3, 1)
                 #print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
-                writer.add_image('Images/rgb_interpolated', print_rgbs_nerf[0], i, dataformats='HWC')
-                writer.add_image('Images/rgb_interpolated0', print_rgbs_nerf[1], i, dataformats='HWC')
-
-
-
-
+                writer.add_image('Images/mask', mask[0], i)
+                writer.add_image('Images/mask0', mask[1], i)
+                writer.add_image('Images/rgb_accumulated', print_rgbs_nerf[0], i, dataformats='HWC')
+                writer.add_image('Images/rgb_accumulated0', print_rgbs_nerf[1], i, dataformats='HWC')
 
 
             #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
@@ -1484,8 +1479,8 @@ def train():
             psnr0 = mse2psnr(img_loss0)
 
         # # #TODO: Only for testing for now
-        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-        #     loss = feature_loss + feature_loss0
+        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+            loss = feature_loss + feature_loss0
 
         loss.backward()
         optimizer.step()
