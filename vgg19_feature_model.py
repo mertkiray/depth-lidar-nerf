@@ -1,23 +1,13 @@
-from collections import namedtuple
-
 import imageio
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
-import torchvision
 from matplotlib import pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
-import torch.nn as nn
 from torchvision import models, transforms, utils
-from PIL import Image
-import torch.nn.functional as F
 
 
 class Vgg19(torch.nn.Module):
     def __init__(self, requires_grad=False):
         super(Vgg19, self).__init__()
-        self.vgg_pretrained_features = models.vgg19(pretrained=True).features[:9].eval()
+        self.vgg_pretrained_features = models.vgg16(pretrained=True).features[:9].eval()
         print(self.vgg_pretrained_features)
         if not requires_grad:
             for param in self.parameters():
@@ -41,7 +31,6 @@ class Vgg19(torch.nn.Module):
                   # '28': 'conv5_1',
                   #'34': 'conv6_1'}
                        }
-
 
     def forward(self, x):
         features = {}
@@ -70,91 +59,25 @@ def unnormalize_image(image_batch):
 
 
 def visualize_features(features):
-
     fig, axarr = plt.subplots(4, 4)
-
-    print(features.shape)
-
     features_viz = features.cpu().numpy()
     features_viz = features_viz[0]
     features_viz = features_viz - features_viz.min()
     features_viz = features_viz / features_viz.max()
-    print(features_viz.shape)
-
     index = 0
     for i in range(4):
         for j in range(4):
             axarr[i][j].imshow(features_viz[index,:,:], cmap='gray')
             index = index + 1
-
     plt.show()
 
 
-def asd():
-    writer = SummaryWriter('runs/vizzz')
-
-    def imread(f):
-        if f.endswith('png'):
-            return imageio.imread(f, ignoregamma=True)
-        else:
-            return imageio.imread(f)
-
-    vgg = Vgg19()
-    print(vgg)
-
-    # colorImage = np.array(Image.open('train_data/images/0000005930.png'))
-    colorImage = imread('n02118333_27_fox.jpg')/255.
-    print(colorImage.shape)
-
-    color_image_tensor = colorImage[None,...]
-    color_image_tensor = torch.Tensor(color_image_tensor)
-    normalized_color_image = prepare_images_vgg19(color_image_tensor)
-    #normalized_color_image = normalized_color_image.permute(1,2,0)
-
-    features = vgg(normalized_color_image)
-    feature1_1 = features['conv4_2']
-
-
-    grid = torchvision.utils.make_grid(feature1_1[:,:,None,...], dataformats='NCHW')
-    writer.add_images("images", grid)
-
-    # layout = (2, 1)
-    # fig, axs = plt.subplots(*layout, figsize=(18, 12))
-    # axs[0].imshow(colorImage)
-    # axs[0].title.set_text('Image')
-    # axs[0].axis('off')
-    # axs[1].imshow(normalized_color_image)
-    # axs[1].title.set_text('Image/255')
-    # axs[1].axis('off')
-
-
-    #visualize_features(feature1_1)
-
-    #plt.show()
-
-    # layout = (2, 1)
-    # fig, axs = plt.subplots(*layout, figsize=(18, 12))
-    #
-    # colorImage = np.array(Image.open('train_data/images/0000005930.png')) / 255.
-    #
-    # axs[0].imshow(colorImage)
-    # axs[0].title.set_text('Projected Depth')
-    # axs[0].axis('off')
-    # plt.show()
-    #
-    # print(colorImage)
-
-    writer.close()
-
 if __name__ == '__main__':
-
-
     def imread(f):
         if f.endswith('png'):
             return imageio.imread(f, ignoregamma=True)
         else:
             return imageio.imread(f)
-
 
     vgg = Vgg19()
     print(vgg)
@@ -165,6 +88,7 @@ if __name__ == '__main__':
 
     color_image_tensor = colorImage[None, ...]
     color_image_tensor = torch.Tensor(color_image_tensor)
+    color_image_tensor = color_image_tensor.permute(0, 3,1,2)
     normalized_color_image = prepare_images_vgg19(color_image_tensor)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -174,19 +98,8 @@ if __name__ == '__main__':
     feature1_2 = features['conv1_2'].to(device)
     feature2_1 = features['conv2_1'].to(device)
     feature2_2 = features['conv2_2'].to(device)
-    feature3_1 = features['conv3_1'].to(device)
-    feature3_2 = features['conv3_2'].to(device)
-    feature3_3 = features['conv3_3'].to(device)
-    feature3_4 = features['conv3_4'].to(device)
-    #feature4_1 = features['conv4_1'].to(device)
-    feature4_2 = features['conv4_2'].to(device)
-    #feature4_3 = features['conv4_3'].to(device)
-    #feature4_4 = features['conv4_4'].to(device)
-    feature5_1 = features['conv5_1'].to(device)
-    feature6_1 = features['conv6_1'].to(device)
 
     normalized_color_image = normalized_color_image.to(device)
-    color_image_tensor = color_image_tensor.permute(0, 3,1,2)
     color_image_tensor = color_image_tensor.to(device)
 
     a = unnormalize_image(normalized_color_image)
@@ -219,7 +132,7 @@ if __name__ == '__main__':
     loss = torch.nn.MSELoss().to(device)
 
     run = [0]
-    while run[0] <= 250:
+    while run[0] <= 1000:
         optimizer.zero_grad()
 
         def closure():
@@ -227,7 +140,6 @@ if __name__ == '__main__':
                 input_img.clamp_(0, 1)
 
             feature_input = vgg(input_img)
-            feature_loss = 0
             #feature_loss = torch.mean((feature1_1 - feature_input['conv1_1']) **2)
             #feature_loss = feature_loss + torch.mean((feature1_2 - feature_input['conv1_2'])**2)
             #feature_loss += torch.mean((feature2_1 - feature_input['conv2_1'])**2)
@@ -241,7 +153,8 @@ if __name__ == '__main__':
             #feature_loss += torch.mean((feature4_3 - feature_input['conv4_3'])**2)
             #feature_loss += torch.mean((feature4_4 - feature_input['conv4_4'])**2)
             #feature_loss = feature_loss + torch.mean((feature5_1 - feature_input['conv5_1'])**2)
-            feature_loss = feature_loss + torch.mean((feature1_1 - feature_input['conv1_1'])**2)
+            feature_loss = torch.mean((feature1_1 - feature_input['conv1_1'])**2)
+            feature_loss = feature_loss + torch.mean((feature1_2 - feature_input['conv1_2'])**2)
             feature_loss.backward()
 
             run[0] += 1

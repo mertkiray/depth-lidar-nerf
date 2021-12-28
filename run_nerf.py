@@ -1,4 +1,6 @@
 import os, sys
+
+import lpips
 import numpy as np
 import imageio
 import json
@@ -15,7 +17,7 @@ from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
-from external_models import Vgg19, prepare_images_vgg19, visualize_features, unnormalize_image
+from vgg19_feature_model import Vgg19, prepare_images_vgg19, visualize_features, unnormalize_image
 from external_models_resnet import Resnet
 from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
 from run_nerf_helpers import *
@@ -771,6 +773,12 @@ def config_parser():
                         help="Height of grad image for feature loss Total ray grad = gradH * gradW")
     parser.add_argument("--gradW", type=int, default=16,
                         help="Width of grad image for feature loss Total ray grad = gradH * gradW")
+    parser.add_argument("--feature_loss_type", type=str, default='vgg',
+                        help='feature loss type: available: lpips, vgg')
+    parser.add_argument("--lpips_spatial", action='store_true',
+                        help="Create spatial image from lpips to understand where model learns.")
+    parser.add_argument("--lpips_backbone", type=str, default='alex',
+                        help="LPIPS BACKBONE Possible: alex, vgg, squeeze")
 
     return parser
 
@@ -1154,10 +1162,22 @@ def train():
         writer.add_image('ImagesGT/depth_on_image_gt', depth_on_image_gt, 0, dataformats='HWC')
 
 
+    if args.feature_loss:
     #TODO: vgg19 creation
-    feature_model = Vgg19()
-    #feature_model = Resnet(output_layer='layer1')
-    feature_model = feature_model.to(device)
+        if args.feature_loss_type == 'vgg':
+            print('USING VGG FEATURE LOSS')
+            feature_model = Vgg19()
+            #feature_model = Resnet(output_layer='layer1')
+            feature_model = feature_model.to(device)
+        #TODO: lpips creation
+        elif args.feature_loss_type == 'lpips':
+            print(f'USING LPIPS FEATURE LOSS : {args.lpips_backbone}')
+            lpips_loss = lpips.LPIPS(net=args.lpips_backbone, spatial=args.lpips_spatial)
+            lpips_loss = lpips_loss.to(device)
+        else:
+            print('FEATURE LOSS TYPE CAN BE vgg OR lpips')
+            exit(-1)
+
 
     # with torch.no_grad():
     #     normalized_training_images = prepare_images_vgg19(images[i_train])
@@ -1301,14 +1321,19 @@ def train():
         #         writer.add_histogram('NERF/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
         #     layer_count += 1
 
-
-        # ## TODO: Close this while not experimenting this slows things down
-        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-            layer_count = 0
-            for parm in render_kwargs_train['network_fine'].parameters():
-                if parm.grad is not None:
-                    writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
-                layer_count += 1
+        ## TODO: Close this while not experimenting this slows things down
+        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+        #     layer_count = 0
+        #     for parm in render_kwargs_train['network_fine'].parameters():
+        #         #print(parm.grad)
+        #         if parm.grad is not None:
+        #             if parm.grad.mean()!=0:
+        #                 writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+        #             else:
+        #                 print(i)
+        #                 print('!!!!!!!!!!!!! GRADIENT FLOW STOPPED !!!!!!!!!!!!!!')
+        #                 exit(-1)
+        #         layer_count += 1
 
         optimizer.zero_grad()
 
@@ -1361,25 +1386,15 @@ def train():
             # TODO: CHECK THIS
             feature_pose = poses[img_semantic_id, :3, :4].squeeze(0)
 
-            ## PIXEL SPACE BETWEEN RAYS   - W/nW    175/32 = 5.blablabla
-
             grad_rays, no_grad_rays, gt_coords = get_rays_cropped_feature_loss_new(H, W, focal, c2w=feature_pose,
                                                                                    nH=args.nH, nW=args.nW,
                                                                                    gradH=args.gradH, gradW=args.gradW)
-            # print(grad)
-            # print(no_grad)
-            # print(gt_coords)
 
             gt_image_new = images[img_semantic_id]
             gt_image_new = gt_image_new[gt_coords[2]:gt_coords[3] + 1, gt_coords[0]:gt_coords[1] + 1]
             gt_image_new = gt_image_new[None, ...]
             gt_image_new = gt_image_new.permute(0, 3, 1, 2)
-            #print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
-            gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
 
-            ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
-            #print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
-            gt_image_features_new = feature_model(gt_image_normalized_new)
 
             if i % args.i_print == 0:
                 print_image_gt = gt_image_new.permute(0, 2, 3 , 1)
@@ -1426,46 +1441,65 @@ def train():
             mask[:,:, grad_positions[...,0], grad_positions[...,1]] =1
             mask[:,:, no_grad_positions[...,0], no_grad_positions[...,1]] = 0
 
-
-
             acc_rgb[:, :, no_grad_positions[..., 0], no_grad_positions[..., 1]] = no_grad_rgbs
             with torch.enable_grad():
                 acc_rgb[:, :, grad_positions[..., 0], grad_positions[..., 1]] = rgbs
 
-            #rgbs_resize_c = F.interpolate(rgbs, size=(H, W),
-            #                              mode='bilinear')
-
-            #print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
-            normalized_rgbs_nerf = prepare_images_vgg19(acc_rgb)
-            #print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
-
             if i % args.i_print == 0:
+                ##TODO: DO NOT NEED THESE PERMUTES, CHANGE DATAFORMATS IN ADD IMAGE
                 print_rgbs_nerf = acc_rgb.permute(0, 2, 3, 1)
                 #print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
                 writer.add_image('Images/mask', mask[0], i)
-                writer.add_image('Images/mask0', mask[1], i)
                 writer.add_image('Images/rgb_accumulated', print_rgbs_nerf[0], i, dataformats='HWC')
-                writer.add_image('Images/rgb_accumulated0', print_rgbs_nerf[1], i, dataformats='HWC')
+                if args.N_importance > 0:
+                    writer.add_image('Images/mask0', mask[1], i)
+                    writer.add_image('Images/rgb_accumulated0', print_rgbs_nerf[1], i, dataformats='HWC')
 
-
-            #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
-            features_rgbs = feature_model(normalized_rgbs_nerf)
-
-            content_features_1_1 = features_rgbs['conv1_1']
-            content_features_1_2 = features_rgbs['conv1_2']
-
-            # if i == 250:
-            #     visualize_features(content_features.detach())
-
-            #feature_loss = torch.mean((features_rgbs[0] - gt_image_features_new)**2)
-            feature_loss = torch.mean((content_features_1_1[0] - gt_image_features_new['conv1_1'])**2)
-            feature_loss = feature_loss + torch.mean((content_features_1_2[0] - gt_image_features_new['conv1_2'])**2)
-
+            feature_loss = 0
             feature_loss0 = 0
-            if args.N_importance > 0:
-                #feature_loss0 = feature_loss0 + torch.mean((features_rgbs[1] - gt_image_features_new)**2)
-                feature_loss0 = torch.mean((content_features_1_1[1] - gt_image_features_new['conv1_1'])**2)
-                feature_loss0 = feature_loss0 + torch.mean((content_features_1_2[1] - gt_image_features_new['conv1_2'])**2)
+            if args.feature_loss_type == 'vgg':
+                # print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
+                gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
+
+                ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
+                # print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
+                gt_image_features_new = feature_model(gt_image_normalized_new)
+
+                # print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
+                normalized_rgbs_nerf = prepare_images_vgg19(acc_rgb)
+                # print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+
+                #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+                features_rgbs = feature_model(normalized_rgbs_nerf)
+
+                content_features_1_1 = features_rgbs['conv1_1']
+                content_features_1_2 = features_rgbs['conv1_2']
+                #feature_loss = torch.mean((features_rgbs[0] - gt_image_features_new)**2)
+                feature_loss = torch.mean((content_features_1_1[0] - gt_image_features_new['conv1_1'])**2)
+                feature_loss = feature_loss + torch.mean((content_features_1_2[0] - gt_image_features_new['conv1_2'])**2)
+
+                if args.N_importance > 0:
+                    #feature_loss0 = feature_loss0 + torch.mean((features_rgbs[1] - gt_image_features_new)**2)
+                    feature_loss0 = torch.mean((content_features_1_1[1] - gt_image_features_new['conv1_1'])**2)
+                    feature_loss0 = feature_loss0 + torch.mean((content_features_1_2[1] - gt_image_features_new['conv1_2'])**2)
+
+            ## TODO: LPIPS GRADIENT 0 OLUYOR BAZEN
+            ## TODO: SPATIAL MAPLERI RGB OLARAK YAZDIRMAYA BAK?
+            if args.feature_loss_type == 'lpips':
+                feature_loss = lpips_loss.forward(gt_image_new, acc_rgb[0], normalize=True)
+
+                if args.N_importance > 0:
+                    feature_loss0 = lpips_loss.forward(gt_image_new, acc_rgb[1], normalize=True)
+
+                if args.lpips_spatial:
+                    if i % args.i_print == 0:
+                        writer.add_image('Images/lpips_spatial', feature_loss[0,0,...].data, i, dataformats='HW')
+                    feature_loss = feature_loss.mean()
+                    if args.N_importance > 0:
+                        if i % args.i_print == 0:
+                            writer.add_image('Images/lpips_spatial0', feature_loss0[0,0,...].data, i, dataformats='HW')
+                        feature_loss0 = feature_loss0.mean()
+
             feature_loss = feature_loss + feature_loss0
 
             #TODO: open for feature loss
