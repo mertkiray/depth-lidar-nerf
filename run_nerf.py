@@ -1412,7 +1412,7 @@ def train():
             else:
                 rgbs = grad_extras_feature_loss['rgb_map'].unsqueeze(0)
                 #print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
-            rgbs = rgbs.permute(0,2,1)
+            rgbs = rgbs.permute(0,2,1).clamp(0, 1)
 
             with torch.no_grad():
 
@@ -1426,7 +1426,7 @@ def train():
                 else:
                     no_grad_rgbs = no_grad_extras_feature_loss['rgb_map'].unsqueeze(0)
                     # print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
-                no_grad_rgbs = no_grad_rgbs.permute(0,2,1)
+                no_grad_rgbs = no_grad_rgbs.permute(0,2,1).clamp(0, 1)
 
 
             im_shape = list(gt_image_new.data.size())
