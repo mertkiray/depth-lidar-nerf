@@ -1,22 +1,23 @@
-expname = mert_lpips_vgg_weird
+expname = todayisanewday11
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
 
-N_rand = 1024
-N_samples = 64
-N_importance = 64
+N_rand = 256
+N_samples = 32
+N_importance = 32
 
 use_viewdirs = True
 raw_noise_std = 1e0
 
-chunk = 8192
-netchunk = 16384
-netdepth = 4
+chunk = 1024
+netchunk = 2048
+netdepth = 3
 
-i_testset = 1000
-i_video = 10000
-N_iters = 200000
+i_testset = 500
+i_video = 1000
+N_iters = 1000
+i_print = 50
 
 factor=8
 
@@ -27,19 +28,14 @@ colmap_depth = False
 depth_loss = False
 depth_lambda = 0.001
 
+
 feature_loss = True
-feature_loss_type = vgg
-
-vgg_layers = ['conv1_2', 'conv2_2', 'conv3_4', 'conv4_4', 'conv5_4']
-vgg_layer_weights = [0.1, 0.1, 1, 1, 1]
-vgg_loss_type = l1
-
+feature_loss_type = lpips
 lpips_backbone = alex
 lpips_spatial = True
-
 feature_start_iteration = 1
 feature_loss_every_n = 1
-feature_lambda = 0.1
+feature_lambda = 1
 nH=47
 nW=64
 gradH=32

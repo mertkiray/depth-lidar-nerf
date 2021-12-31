@@ -5,10 +5,39 @@ from torchvision import models, transforms, utils
 
 
 class Vgg19(torch.nn.Module):
-    def __init__(self, requires_grad=False):
+    def __init__(self, layers_to_use=None, requires_grad=False):
         super(Vgg19, self).__init__()
-        self.vgg_pretrained_features = models.vgg16(pretrained=True).features[:9].eval()
-        print(self.vgg_pretrained_features)
+
+        if layers_to_use is None:
+            print('VGG LAYERS CANNOT BE EMPTY PLEASE SET IT IN CONFIG TXT')
+            exit(-1)
+
+        self.layers = {'0': 'conv1_1',
+                  '2': 'conv1_2',
+                  '5': 'conv2_1',
+                  '7': 'conv2_2',
+                  '10': 'conv3_1',
+                  '12': 'conv3_2',
+                  '14': 'conv3_3',
+                  '16': 'conv3_4',
+                  '19': 'conv4_1',
+                  '21': 'conv4_2',
+                  '23': 'conv4_3',
+                  '25': 'conv4_4',
+                  '28': 'conv5_1',
+                  '30': 'conv5_2',
+                  '32': 'conv5_3',
+                  '34': 'conv5_4',
+                       }
+
+        last_layer = 0
+        for layer_num, layer_name in self.layers.items():
+            if layer_name == layers_to_use[-1]:
+                last_layer = layer_num
+        last_layer = int(last_layer)+1
+
+        self.vgg_pretrained_features = models.vgg19(pretrained=True).features[:last_layer].eval()
+        print(f'VGG MODEL: {self.vgg_pretrained_features}')
         if not requires_grad:
             for param in self.parameters():
                 param.requires_grad = False
@@ -16,21 +45,6 @@ class Vgg19(torch.nn.Module):
         #     if isinstance(layer, nn.ReLU):
         #         self.vgg_pretrained_features._modules[name] = nn.ReLU(inplace=False)
 
-        self.layers = {'0': 'conv1_1',
-                  '2': 'conv1_2',
-                  '5': 'conv2_1',
-                  '7': 'conv2_2',
-                  # '10': 'conv3_1',
-                  # '12': 'conv3_2',
-                  # '14': 'conv3_3',
-                  # '16': 'conv3_4',
-                  # '19': 'conv4_1',
-                  # '21': 'conv4_2',  ## content representation
-                  # '23': 'conv4_3',  ## content representation
-                  # '25': 'conv4_4',  ## content representation
-                  # '28': 'conv5_1',
-                  #'34': 'conv6_1'}
-                       }
 
     def forward(self, x):
         features = {}
@@ -98,6 +112,9 @@ if __name__ == '__main__':
     feature1_2 = features['conv1_2'].to(device)
     feature2_1 = features['conv2_1'].to(device)
     feature2_2 = features['conv2_2'].to(device)
+    feature3_4 = features['conv3_4'].to(device)
+    feature4_4 = features['conv4_4'].to(device)
+    feature5_4 = features['conv5_4'].to(device)
 
     normalized_color_image = normalized_color_image.to(device)
     color_image_tensor = color_image_tensor.to(device)
@@ -125,14 +142,14 @@ if __name__ == '__main__':
     #input_img = prepare_images_vgg19(input_img).contiguous()
 
     input_img = input_img.to(device)
-    optimizer = torch.optim.Adam([input_img], lr=0.1)
+    optimizer = torch.optim.Adam([input_img], lr=5e-4)
     vgg = vgg.to(device)
     input_img.requires_grad_(True)
     vgg.requires_grad_(False)
     loss = torch.nn.MSELoss().to(device)
 
     run = [0]
-    while run[0] <= 1000:
+    while run[0] <= 100:
         optimizer.zero_grad()
 
         def closure():
@@ -153,8 +170,11 @@ if __name__ == '__main__':
             #feature_loss += torch.mean((feature4_3 - feature_input['conv4_3'])**2)
             #feature_loss += torch.mean((feature4_4 - feature_input['conv4_4'])**2)
             #feature_loss = feature_loss + torch.mean((feature5_1 - feature_input['conv5_1'])**2)
-            feature_loss = torch.mean((feature1_1 - feature_input['conv1_1'])**2)
-            feature_loss = feature_loss + torch.mean((feature1_2 - feature_input['conv1_2'])**2)
+            feature_loss = torch.mean((feature1_2 - feature_input['conv1_2'])) * 0.1
+            feature_loss = feature_loss + torch.mean((feature2_2 - feature_input['conv2_2'])) * 0.1
+            feature_loss = feature_loss + torch.mean((feature3_4 - feature_input['conv3_4']))
+            feature_loss = feature_loss + torch.mean((feature4_4 - feature_input['conv4_4']))
+            feature_loss = feature_loss + torch.mean((feature5_4 - feature_input['conv5_4']))
             feature_loss.backward()
 
             run[0] += 1

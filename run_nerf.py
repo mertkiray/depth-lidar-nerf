@@ -779,6 +779,12 @@ def config_parser():
                         help="Create spatial image from lpips to understand where model learns.")
     parser.add_argument("--lpips_backbone", type=str, default='alex',
                         help="LPIPS BACKBONE Possible: alex, vgg, squeeze")
+    parser.add_argument("--vgg_layers", type=str, nargs='*',
+                        help="VGG Layers to use")
+    parser.add_argument("--vgg_layer_weights", type=float, default=[1, 1], nargs='*',
+                        help="VGG Layers weights for each layer")
+    parser.add_argument("--vgg_loss_type", type=str, default='l2',
+                        help="VGG feature loss type, l1 or l2")
 
     return parser
 
@@ -1166,7 +1172,7 @@ def train():
     #TODO: vgg19 creation
         if args.feature_loss_type == 'vgg':
             print('USING VGG FEATURE LOSS')
-            feature_model = Vgg19()
+            feature_model = Vgg19(args.vgg_layers)
             #feature_model = Resnet(output_layer='layer1')
             feature_model = feature_model.to(device)
         #TODO: lpips creation
@@ -1322,18 +1328,13 @@ def train():
         #     layer_count += 1
 
         ## TODO: Close this while not experimenting this slows things down
-        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-        #     layer_count = 0
-        #     for parm in render_kwargs_train['network_fine'].parameters():
-        #         #print(parm.grad)
-        #         if parm.grad is not None:
-        #             if parm.grad.mean()!=0:
-        #                 writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
-        #             else:
-        #                 print(i)
-        #                 print('!!!!!!!!!!!!! GRADIENT FLOW STOPPED !!!!!!!!!!!!!!')
-        #                 exit(-1)
-        #         layer_count += 1
+        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+            layer_count = 0
+            for parm in render_kwargs_train['network_fine'].parameters():
+                #print(parm.grad)
+                if parm.grad is not None:
+                    writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+                layer_count += 1
 
         optimizer.zero_grad()
 
@@ -1472,16 +1473,21 @@ def train():
                 #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
                 features_rgbs = feature_model(normalized_rgbs_nerf)
 
-                content_features_1_1 = features_rgbs['conv1_1']
-                content_features_1_2 = features_rgbs['conv1_2']
-                #feature_loss = torch.mean((features_rgbs[0] - gt_image_features_new)**2)
-                feature_loss = torch.mean((content_features_1_1[0] - gt_image_features_new['conv1_1'])**2)
-                feature_loss = feature_loss + torch.mean((content_features_1_2[0] - gt_image_features_new['conv1_2'])**2)
 
-                if args.N_importance > 0:
-                    #feature_loss0 = feature_loss0 + torch.mean((features_rgbs[1] - gt_image_features_new)**2)
-                    feature_loss0 = torch.mean((content_features_1_1[1] - gt_image_features_new['conv1_1'])**2)
-                    feature_loss0 = feature_loss0 + torch.mean((content_features_1_2[1] - gt_image_features_new['conv1_2'])**2)
+                for i_vgg_loss, loss_layer in enumerate(args.vgg_layers):
+                    if args.vgg_loss_type == 'l1':
+                        feature_loss = feature_loss + torch.mean(torch.abs(features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
+                        if args.N_importance > 0:
+                            feature_loss0 = feature_loss0 + torch.mean(torch.abs(features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
+
+                    elif args.vgg_loss_type == 'l2':
+                        feature_loss = feature_loss + torch.mean((features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
+                        if args.N_importance > 0:
+                            feature_loss0 = feature_loss0 + torch.mean((features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
+                    else:
+                        print('VGG LOSS TYPE SHOULD BE L1 OR L2')
+                        exit(-1)
+
 
             ## TODO: LPIPS GRADIENT 0 OLUYOR BAZEN
             ## TODO: SPATIAL MAPLERI RGB OLARAK YAZDIRMAYA BAK?
