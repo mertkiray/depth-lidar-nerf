@@ -1200,6 +1200,7 @@ def train():
             exit(-1)
 
     if args.gan_loss:
+        ##TODO: Choose discriminator
         discriminator = ESRDiscriminator(input_shape=[3, args.nH, args.nW])
         #discriminator = LSDiscriminator(input_shape=[3, args.nH, args.nW])
         #discriminator = DCDiscriminator(img_size=args.nH, n_feat=256)
@@ -1216,6 +1217,7 @@ def train():
         gan_valid = Variable(torch.ones((1, 1)), requires_grad=False).to(device)
         gan_fake = Variable(torch.zeros((1, 1)), requires_grad=False).to(device)
 
+        ##TODO: Noise???
         gan_noise_mean = 0.
         start_gan_noise_std = 0.1
         gan_noise_std = 0.1
@@ -1690,6 +1692,7 @@ def train():
             writer.add_scalar("lr", new_lrate, i)
 
 
+        ##TODO: UPDATE DISCRIMINATOR LR? AND NOISE?
         if args.gan_loss:
             # for param_group_d in optimizer_D.param_groups:
             #     param_group_d['lr'] = new_lrate
