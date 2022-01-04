@@ -1,4 +1,4 @@
-expname = mert_lpips_vgg_weird
+expname = mert_rgb_and_feature_gan
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -16,7 +16,9 @@ netdepth = 4
 
 i_testset = 1000
 i_video = 10000
-N_iters = 200000
+N_iters = 150000
+i_print = 100
+i_weights = 150000
 
 factor=8
 
@@ -29,18 +31,23 @@ depth_lambda = 0.001
 
 feature_loss = True
 feature_loss_type = vgg
+feature_start_iteration = 1
+feature_loss_every_n = 1
+feature_lambda = 1
 
-vgg_layers = ['conv1_2', 'conv2_2', 'conv3_4', 'conv4_4', 'conv5_4']
-vgg_layer_weights = [0.1, 0.1, 1, 1, 1]
+vgg_layers = [conv1_1]
+vgg_layer_weights = [1]
 vgg_loss_type = l1
 
 lpips_backbone = alex
 lpips_spatial = True
 
-feature_start_iteration = 1
-feature_loss_every_n = 1
-feature_lambda = 0.1
-nH=47
-nW=64
-gradH=32
-gradW=32
+gan_loss = True
+gan_lambda = 0.001
+gan_start_iteration = 5000
+gan_disc_lrate = 2e-4
+
+nH=32
+nW=32
+gradH=30
+gradW=30

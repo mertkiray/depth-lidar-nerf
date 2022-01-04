@@ -12,11 +12,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+from torch.autograd import Variable
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
 
+from discriminator import ESRDiscriminator, LSDiscriminator, weights_init_normal, DCDiscriminator, BasicDiscriminator
 from vgg19_feature_model import Vgg19, prepare_images_vgg19, visualize_features, unnormalize_image
 from external_models_resnet import Resnet
 from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
@@ -472,6 +474,11 @@ def create_nerf(args):
 
     ##########################
 
+    from torchsummary import summary
+    print(f'NERF MODEL')
+    print(summary(model, (1024, 90)))
+    print(f'NERF MODEL FINE')
+    print(summary(model_fine, (1024, 90)))
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
 
@@ -785,6 +792,14 @@ def config_parser():
                         help="VGG Layers weights for each layer")
     parser.add_argument("--vgg_loss_type", type=str, default='l2',
                         help="VGG feature loss type, l1 or l2")
+    parser.add_argument("--gan_loss", action='store_true',
+                        help="Use GAN Loss or not")
+    parser.add_argument("--gan_lambda", type=float, default=0.1,
+                        help="GAN Loss lambda")
+    parser.add_argument("--gan_start_iteration", type=int, default=500,
+                        help="GAN Loss start iteration")
+    parser.add_argument("--gan_disc_lrate", type=float, default=5e-4,
+                        help="GAN Discriminator learning rate")
 
     return parser
 
@@ -1184,6 +1199,29 @@ def train():
             print('FEATURE LOSS TYPE CAN BE vgg OR lpips')
             exit(-1)
 
+    if args.gan_loss:
+        discriminator = ESRDiscriminator(input_shape=[3, args.nH, args.nW])
+        #discriminator = LSDiscriminator(input_shape=[3, args.nH, args.nW])
+        #discriminator = DCDiscriminator(img_size=args.nH, n_feat=256)
+        #discriminator = BasicDiscriminator(input_shape=[3, args.nH, args.nW])
+        discriminator = discriminator.to(device)
+        #discriminator.apply(weights_init_normal)
+        print(f' DISCRIMINATOR: {discriminator}')
+        print(f' DISCRIMINATOR OUTPUT SHAPE: {discriminator.output_shape}')
+
+        #criterion_GAN = torch.nn.BCEWithLogitsLoss().to(device)
+        criterion_GAN = torch.nn.MSELoss().to(device)
+        optimizer_D = torch.optim.Adam(params=discriminator.parameters(), lr=args.gan_disc_lrate, betas=(0.9, 0.999))
+
+        gan_valid = Variable(torch.ones((1, 1)), requires_grad=False).to(device)
+        gan_fake = Variable(torch.zeros((1, 1)), requires_grad=False).to(device)
+
+        gan_noise_mean = 0.
+        start_gan_noise_std = 0.1
+        gan_noise_std = 0.1
+
+        print(f'GAN VALID SHAPE: {gan_valid.shape}')
+        print(f'GAN FAKE SHAPE: {gan_fake.shape}')
 
     # with torch.no_grad():
     #     normalized_training_images = prepare_images_vgg19(images[i_train])
@@ -1206,7 +1244,7 @@ def train():
     start = start + 1
 
     for i in trange(start, N_iters):
-        writer.add_scalar("Iteration", i, i)
+        #writer.add_scalar("Iteration", i, i)
         time0 = time.time()
 
         # Sample random ray batch
@@ -1328,15 +1366,28 @@ def train():
         #     layer_count += 1
 
         ## TODO: Close this while not experimenting this slows things down
-        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-            layer_count = 0
-            for parm in render_kwargs_train['network_fine'].parameters():
-                #print(parm.grad)
-                if parm.grad is not None:
-                    writer.add_histogram('NERF_FEATURE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
-                layer_count += 1
+        # if (args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0) or (args.gan_loss and i >= args.gan_start_iteration):
+        #     layer_count = 0
+        #     for parm in render_kwargs_train['network_fine'].parameters():
+        #         #print(parm.grad)
+        #         if parm.grad is not None:
+        #             writer.add_histogram('NERF_FINE/layer_'+ str(layer_count), parm.grad.data.cpu().numpy(), i)
+        #         layer_count += 1
+        #
+        # if (args.feature_loss and i >= args.feature_start_iteration and i % args.feature_loss_every_n == 0) or (
+        #         args.gan_loss and i >= args.gan_start_iteration):
+        #     layer_count = 0
+        #     for parm in render_kwargs_train['network_fn'].parameters():
+        #         # print(parm.grad)
+        #         if parm.grad is not None:
+        #             writer.add_histogram('NERF_COARSE/layer_' + str(layer_count), parm.grad.data.cpu().numpy(), i)
+        #         layer_count += 1
 
         optimizer.zero_grad()
+
+        ## TODO: GAN LOSS
+        if args.gan_loss:
+            optimizer_D.zero_grad()
 
         img_loss = img2mse(rgb, target_s)
         psnr = mse2psnr(img_loss)
@@ -1376,7 +1427,7 @@ def train():
 
 
 
-        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+        if (args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0) or (args.gan_loss and i >= args.gan_start_iteration):
             # TODO: RENDER AN IMAGE AND CALCULATE SEMANTIC LOSS
             img_semantic_id = random.choice(i_train)
             #img_semantic_idx = np.where(i_train == img_semantic_id)
@@ -1398,7 +1449,9 @@ def train():
 
 
             if i % args.i_print == 0:
-                print_image_gt = gt_image_new.permute(0, 2, 3 , 1)
+                noise = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+                print_image_gt = gt_image_new + noise
+                print_image_gt = print_image_gt.permute(0,2,3,1)
                 #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
                 writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
 
@@ -1456,60 +1509,90 @@ def train():
                     writer.add_image('Images/mask0', mask[1], i)
                     writer.add_image('Images/rgb_accumulated0', print_rgbs_nerf[1], i, dataformats='HWC')
 
-            feature_loss = 0
-            feature_loss0 = 0
-            if args.feature_loss_type == 'vgg':
-                # print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
-                gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
 
-                ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
-                # print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
-                gt_image_features_new = feature_model(gt_image_normalized_new)
+            if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+                feature_loss = 0
+                feature_loss0 = 0
+                if args.feature_loss_type == 'vgg':
+                    # print(f'NORMALIZING 1 GT IMAGE WITH SHAPE: {gt_image_new.shape} ')
+                    gt_image_normalized_new = prepare_images_vgg19(gt_image_new)
 
-                # print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
-                normalized_rgbs_nerf = prepare_images_vgg19(acc_rgb)
-                # print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+                    ## VGG REQUIRES SHAPE 3 x H x W  ==> satisfy that
+                    # print(f'GT IMAGE NORMALIZED_SHAPE: {gt_image_normalized_new.shape}')
+                    gt_image_features_new = feature_model(gt_image_normalized_new)
 
-                #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
-                features_rgbs = feature_model(normalized_rgbs_nerf)
+                    # print(f'NORMALIZING IMAGES RENDERED BY NERF: {rgbs.shape} ')
+                    normalized_rgbs_nerf = prepare_images_vgg19(acc_rgb)
+                    # print(f'NORMALED IMAGES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
 
-
-                for i_vgg_loss, loss_layer in enumerate(args.vgg_layers):
-                    if args.vgg_loss_type == 'l1':
-                        feature_loss = feature_loss + torch.mean(torch.abs(features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
-                        if args.N_importance > 0:
-                            feature_loss0 = feature_loss0 + torch.mean(torch.abs(features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
-
-                    elif args.vgg_loss_type == 'l2':
-                        feature_loss = feature_loss + torch.mean((features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
-                        if args.N_importance > 0:
-                            feature_loss0 = feature_loss0 + torch.mean((features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
-                    else:
-                        print('VGG LOSS TYPE SHOULD BE L1 OR L2')
-                        exit(-1)
+                    #print(f'EXTRACTING FEATURES RENDERED BY NERF: {normalized_rgbs_nerf.shape} ')
+                    features_rgbs = feature_model(normalized_rgbs_nerf)
 
 
-            ## TODO: LPIPS GRADIENT 0 OLUYOR BAZEN
-            ## TODO: SPATIAL MAPLERI RGB OLARAK YAZDIRMAYA BAK?
-            if args.feature_loss_type == 'lpips':
-                feature_loss = lpips_loss.forward(gt_image_new, acc_rgb[0], normalize=True)
+                    for i_vgg_loss, loss_layer in enumerate(args.vgg_layers):
+                        if args.vgg_loss_type == 'l1':
+                            feature_loss = feature_loss + torch.mean(torch.abs(features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
+                            if args.N_importance > 0:
+                                feature_loss0 = feature_loss0 + torch.mean(torch.abs(features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
 
-                if args.N_importance > 0:
-                    feature_loss0 = lpips_loss.forward(gt_image_new, acc_rgb[1], normalize=True)
+                        elif args.vgg_loss_type == 'l2':
+                            feature_loss = feature_loss + torch.mean((features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
+                            if args.N_importance > 0:
+                                feature_loss0 = feature_loss0 + torch.mean((features_rgbs[loss_layer][1] - gt_image_features_new[loss_layer]) ** 2) * args.vgg_layer_weights[i_vgg_loss]
+                        else:
+                            print('VGG LOSS TYPE SHOULD BE L1 OR L2')
+                            exit(-1)
 
-                if args.lpips_spatial:
-                    if i % args.i_print == 0:
-                        writer.add_image('Images/lpips_spatial', feature_loss[0,0,...].data, i, dataformats='HW')
-                    feature_loss = feature_loss.mean()
+
+                ## TODO: LPIPS GRADIENT 0 OLUYOR BAZEN
+                ## TODO: SPATIAL MAPLERI RGB OLARAK YAZDIRMAYA BAK?
+                if args.feature_loss_type == 'lpips':
+                    feature_loss = lpips_loss.forward(gt_image_new, acc_rgb[0], normalize=True)
+
                     if args.N_importance > 0:
+                        feature_loss0 = lpips_loss.forward(gt_image_new, acc_rgb[1], normalize=True)
+
+                    if args.lpips_spatial:
                         if i % args.i_print == 0:
-                            writer.add_image('Images/lpips_spatial0', feature_loss0[0,0,...].data, i, dataformats='HW')
-                        feature_loss0 = feature_loss0.mean()
+                            writer.add_image('Images/lpips_spatial', feature_loss[0,0,...].data, i, dataformats='HW')
+                        feature_loss = feature_loss.mean()
+                        if args.N_importance > 0:
+                            if i % args.i_print == 0:
+                                writer.add_image('Images/lpips_spatial0', feature_loss0[0,0,...].data, i, dataformats='HW')
+                            feature_loss0 = feature_loss0.mean()
 
-            feature_loss = feature_loss + feature_loss0
+                feature_loss = feature_loss + feature_loss0
 
-            #TODO: open for feature loss
-            loss = loss + feature_loss * args.feature_lambda
+                #TODO: open for feature loss
+                loss = loss + feature_loss * args.feature_lambda
+
+
+            if args.gan_loss and i >= args.gan_start_iteration:
+
+                noise = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+
+                pred_nerf = discriminator(acc_rgb[None,0] + noise)
+                gan_loss = criterion_GAN(pred_nerf, gan_valid)
+
+                # if i % args.i_print == 0:
+                #     print(f'NERF DISCRIMINATOR PRED :{pred_nerf}')
+
+                gan_loss0 = 0
+                if args.N_importance > 0:
+                    noise = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+                    pred_nerf0 = discriminator(acc_rgb[None,1] + noise)
+                    gan_loss0 = criterion_GAN(pred_nerf0, gan_valid)
+
+                loss = loss + 0.5 * (gan_loss + gan_loss0) * args.gan_lambda
+                #loss = loss + gan_loss * args.gan_lambda
+
+                if i%args.i_print==0:
+                    writer.add_scalars("Train/NERF_GAN_PRED",{
+                    'pred_nerf': pred_nerf,
+                    'pred_nerf0' : pred_nerf0
+                    }, i)
+
+
         # timer_loss = time.perf_counter()
 
         # TODO: What is this?
@@ -1519,11 +1602,61 @@ def train():
             psnr0 = mse2psnr(img_loss0)
 
         # # #TODO: Only for testing for now
-        if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
-            loss = feature_loss + feature_loss0
+        # if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
+        #     loss = feature_loss + feature_loss0
+
+        # # #TODO: Only for testing for now
+        # if args.gan_loss and i >= args.gan_start_iteration:
+        #     #loss = gan_loss + gan_loss0
+        #     loss = 0.5 * (gan_loss + gan_loss0) * args.gan_lambda
 
         loss.backward()
         optimizer.step()
+
+
+
+        ##TODO: TRAIN DISCRIMINATOR:
+        if args.gan_loss and i >= args.gan_start_iteration:
+            optimizer_D.zero_grad()
+
+            noise_real = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+            noise_fake = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+
+            pred_real = discriminator(gt_image_new.contiguous() + noise_real)
+            pred_fake = discriminator(acc_rgb[None,0].detach() + noise_fake)
+
+            # Adversarial loss for real and fake images (relativistic average GAN)
+            loss_real = criterion_GAN(pred_real , gan_valid)
+            loss_fake = criterion_GAN(pred_fake, gan_fake)
+
+
+            # if i % args.i_print == 0:
+            #     print(f'DISCRIMINATOR GT PRED :{pred_real}')
+            #     print(f'DISCRIMINATOR FAKE PRED :{pred_fake}')
+
+
+            loss_fake0 = 0
+            if args.N_importance > 0:
+                noise_fake0 = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
+                pred_fake0 = discriminator(acc_rgb[None,1].detach() + noise_fake0)
+                loss_fake0 = criterion_GAN(pred_fake0, gan_fake)
+
+            # Total loss
+            loss_fakes =  0.5 * (loss_fake + loss_fake0)
+            loss_dis = loss_fakes + 0.5 * loss_real
+
+            if i % args.i_print == 0:
+                writer.add_scalars("Train/GAN_DISCRIMINATOR_PRED", {
+                    'pred_real': pred_real,
+                    'pred_fake': pred_fake,
+                    'pred_fake0': pred_fake0
+                }, i)
+
+            loss_dis.backward()
+            optimizer_D.step()
+
+
+
 
         # timer_backward = time.perf_counter()
         # print('\nconcate:',timer_concate-timer_0)
@@ -1553,7 +1686,21 @@ def train():
         for param_group in optimizer.param_groups:
             param_group['lr'] = new_lrate
 
-        writer.add_scalar("lr", new_lrate, i)
+        if i%args.i_print==0:
+            writer.add_scalar("lr", new_lrate, i)
+
+
+        if args.gan_loss:
+            # for param_group_d in optimizer_D.param_groups:
+            #     param_group_d['lr'] = new_lrate
+            #
+            # writer.add_scalar("discriminator_lr", new_lrate, i)
+
+            noise_decay_rate = 0.9
+            gan_noise_std = start_gan_noise_std * (noise_decay_rate ** (global_step / 1000))
+            writer.add_scalar("gan_noise_std", gan_noise_std, i)
+
+
         ################################
 
         dt = time.time()-time0
@@ -1615,6 +1762,12 @@ def train():
 
             if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
                 writer.add_scalar("Train/feature_loss", feature_loss * args.feature_lambda, i)
+            if args.gan_loss and i >= args.gan_start_iteration:
+                writer.add_scalars("Train/GAN",{
+                'GAN': gan_loss,
+                'DISCRIMINATOR' : loss_dis
+                }, i)
+
             if not args.depth_loss:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
