@@ -104,7 +104,7 @@ class NeRF(nn.Module):
             self.output_linear = nn.Linear(W, output_ch)
 
         if self.semantic_num_classes:
-            self.semantic_linear = nn.Linear(W//2, semantic_num_classes)
+            self.semantic_linear = nn.Linear(W, semantic_num_classes)
 
     def forward(self, x):
         input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
@@ -118,6 +118,7 @@ class NeRF(nn.Module):
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
             feature = self.feature_linear(h)
+
             h = torch.cat([feature, input_views], -1)
         
             for i, l in enumerate(self.views_linears):
@@ -129,7 +130,7 @@ class NeRF(nn.Module):
             outputs = torch.cat([rgb, alpha], -1)
 
             if self.semantic_linear:
-                semantic_class = self.semantic_linear(h)
+                semantic_class = self.semantic_linear(feature)
                 outputs = torch.cat([outputs, semantic_class], -1)
 
         else:
@@ -577,7 +578,10 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
 
 
     if semantic_loss:
-        semantic_class_preds = torch.sum(weights[..., None] * raw[..., 4:], -2)
+        ## TODO: ??? SHOULD WE USE WEIGHTS FOR SEMANTIC CALCULATION?
+        #semantic_class_preds = torch.sum(weights[..., None] * raw[..., 4:], -2)
+        semantic_class_preds = torch.sum(raw[..., 4:], -2)
+
         #semantic_map = F.softmax(semantic_map, dim=0)
         #_, semantic_class_preds = torch.max(semantic_map, axis=-1)
         return rgb_map, disp_map, acc_map, weights, depth_map, semantic_class_preds

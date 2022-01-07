@@ -1578,17 +1578,18 @@ def train():
 
         loss = img_loss + args.depth_lambda * depth_importance * depth_loss + args.sigma_lambda * sigma_loss
 
-        semantic_loss = 0
+
         semantic_loss0 = 0
-        divide = 1
+        semantic_loss = 0
         if args.semantic_loss:
             semantic_loss = F.cross_entropy(sem_preds, target_semantic)
 
+            ##TODO: SHOULD WE BACKPROP FOR COARSE MODEL, HYPERPARAM!!
             if 'sem_preds0' in extras:
                 semantic_loss0 = F.cross_entropy(sem_preds0, target_semantic)
-                divide = 0.5
 
-        loss = loss + args.semantic_lambda * (semantic_loss + semantic_loss0) * divide
+        loss = loss + args.semantic_lambda * (semantic_loss + semantic_loss0) * 0.5
+        #loss = loss + args.semantic_lambda * semantic_loss
 
 
         if (args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0) or (args.gan_loss and i >= args.gan_start_iteration):
@@ -1897,11 +1898,8 @@ def train():
                     print('Done, saving', rgbs.shape, disps.shape)
 
             imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'no8b_rgb.mp4', rgbs, fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'to8bdisp.mp4', to8b(disps / np.nanmax(disps)), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'to8b_percentile_disp.mp4', to8b(disps / np.percentile(disps, 95)), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'no8b_disp.mp4', disps / np.nanmax(disps), fps=30, quality=8)
-            imageio.mimwrite(moviebase + 'no8b_percentile_disp.mp4', to8b(disps / np.percentile(disps, 95)), fps=30, quality=8)
+            imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.nanmax(disps)), fps=30, quality=8)
+            imageio.mimwrite(moviebase + 'disp_perc.mp4', to8b(disps / np.percentile(disps, 95)), fps=30, quality=8)
 
 
             # if args.use_viewdirs:
@@ -1966,6 +1964,7 @@ def train():
 
             if args.semantic_loss:
                 writer.add_scalar("Train/semantic_loss", semantic_loss * args.semantic_lambda, i)
+                ##TODO: SHOULD WE BACKPROP FOR COARSE MODEL SEMANTIC LOSS IF YES LOG IT :)
                 if 'sem_preds0' in extras:
                     writer.add_scalar("Train/semantic_loss0", semantic_loss0 * args.semantic_lambda, i)
 
