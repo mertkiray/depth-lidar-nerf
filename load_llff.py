@@ -1,6 +1,10 @@
 import numpy as np
 import os, imageio
 from pathlib import Path
+
+import torch
+from matplotlib import pyplot as plt
+
 from colmapUtils.read_write_model import *
 from colmapUtils.read_write_dense import *
 import json
@@ -8,6 +12,8 @@ import json
 
 ########## Slightly modified version of LLFF data loading code 
 ##########  see https://github.com/Fyusion/LLFF for original
+from preprocess.KITTI360.segmentor import SemanticSegmentorHelper
+
 
 def _minify(basedir, factors=[], resolutions=[]):
     needtoload = False
@@ -452,7 +458,7 @@ def load_sensor_depth(basedir, factor=8, bd_factor=.75):
     np.save(data_file, data_list)
     return data_list
 
-def load_lidar_depth(basedir, hwf, factor=8, bd_factor=.75):
+def load_lidar_depth(basedir, hwf, factor=None, bd_factor=.75):
     print(hwf)
     data_file = os.path.join(basedir, 'depth_gt.npy')
     data_list = np.load(data_file, allow_pickle=True)
@@ -463,11 +469,13 @@ def load_lidar_depth(basedir, hwf, factor=8, bd_factor=.75):
     # Rescale if bd_factor is provided
     sc = 1. if bd_factor is None else 1. / (bds_raw.min() * bd_factor)
 
+    scale_data = 1
+    if factor:
+        scale_data = factor
 
     ## TODO: Maybe calculate as load_colmap_depth
     for data in data_list:
-        pass
-        coord = data['coord'] / factor
+        coord = data['coord'] / scale_data
 
         # TODO: TURN COORDS INTO NDC ?
         # coord[:, 0] = coord[:, 0] / hwf[1] * 2 - 1
@@ -489,5 +497,37 @@ def load_lidar_depth(basedir, hwf, factor=8, bd_factor=.75):
         #data['depth'] = (data['depth'] - np.min(data['depth'])) / (np.max(data['depth']) - np.min(data['depth']))
 
     return data_list
+    
+
+
+def load_semantic_data(basedir, hwf, factor=None):
+    print(hwf)
+    print('========================ASD')
+    data_file = os.path.join(basedir, 'segmentation_gt.npy')
+    data_list = np.load(data_file, allow_pickle=True)
+    data_list = data_list.item()
+
+    segmentor_helper = SemanticSegmentorHelper()
+
+    segmentations = data_list['segmentations']
+    num_class = data_list['num_classes']
+
+    segmentations = torch.from_numpy(segmentations)
+    print(segmentations.shape)
+
+    if factor:
+        segmentations = segmentor_helper.downsample_predictions(segmentations, H=int(hwf[0]), W=int(hwf[1]))
+
+
+    # print('==========================================')
+    # for segmentation in segmentations:
+    #     print(segmentation.shape)
+    #     visual = segmentor_helper.get_segmented_image(segmentation)
+    #     print(f' VISUAL SHAPE: {visual.shape}')
+    #     plt.imshow(visual)
+    #     plt.show()
+
+
+    return segmentations, num_class
     
 

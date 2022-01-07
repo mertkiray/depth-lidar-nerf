@@ -1,8 +1,19 @@
 import os
+
+import imageio
 import numpy as np
 import yaml
-from Kitti360Dataset import Kitti360Dataset
+from matplotlib import pyplot as plt
 
+from Kitti360Dataset import Kitti360Dataset
+from preprocess.KITTI360.segmentor import SemanticSegmentor, SemanticSegmentorHelper
+
+
+def imread(f):
+    if f.endswith('png'):
+        return imageio.imread(f, ignoregamma=True)
+    else:
+        return imageio.imread(f)
 
 def preprocess_kitti():
     with open('config.yaml', 'r') as stream:
@@ -11,19 +22,49 @@ def preprocess_kitti():
     cam_id = config['cam_id']
     seq_id = config['seq_id']
     image_folder = config['image_folder']
+    segmentor_config = config['segmentor_config']
+    segmentor_weights = config['segmentor_weights']
 
-    files = os.listdir(image_folder)
+    files = sorted(os.listdir(image_folder))
     image_nums = []
+    image_paths = []
     for file in files:
+        file_path = image_folder + '/' + file
+        image_paths.append(file_path)
         file = file.split('.png')
         image_nums.append(int(file[0].lstrip('0')))
 
     image_nums.sort()
 
+
+    print(image_paths)
+    segmentor = SemanticSegmentor(segmentor_config, segmentor_weights)
+    segmentor_helper = SemanticSegmentorHelper()
+
+    segmentation_gt = []
+    for image in image_paths:
+        im = imread(image)
+        #VERY IMPORTANT! DETECTRON2 MODELS USE BGR INPUT
+        im = im[:, :, ::-1]
+        outputs = segmentor.segment_image(im)
+        # TODO: We know train motorcycle and bicycle do not included in this scene, adjust this dependent to each scene
+        outputs = segmentor_helper.zero_out_no_exists_classes(np.array([11,12, 14, 15, 16]), outputs)
+        # Turn into probabilities
+        outputs = segmentor_helper.get_probabilities(outputs)
+
+        class_preds = segmentor_helper.get_class_preds(outputs)
+        segmentation_gt.append(class_preds)
+
+        # visual = segmentor_helper.get_segmented_image(class_preds)
+        #
+        # plt.imshow(visual)
+        # plt.show()
+
+    segmentation_gt = np.stack(segmentation_gt, axis=0)
+    segmentation_result = {'segmentations': segmentation_gt, 'num_classes': 19}
+    np.save('../../train_data/segmentation_gt.npy', segmentation_result)
+
     dataset = Kitti360Dataset(seq_id, cam_id)
-
-    processed_data = []
-
     dataset.create_poses_bounds_and_gt_depths(image_nums)
 
     # for frame in config['frame_no']:
@@ -39,8 +80,10 @@ def preprocess_kitti():
 
 
 def read_data():
-    arr = np.load('colmap_depth.npy', allow_pickle=True)
-    print(arr[0]['depth'].max())
+    arr = np.load('../../train_data/segmentation_gt.npy', allow_pickle=True)
+    arr = arr.item()
+    print(arr['segmentations'])
+    print(arr['num_classes'])
 
 if __name__ == '__main__':
     preprocess_kitti()

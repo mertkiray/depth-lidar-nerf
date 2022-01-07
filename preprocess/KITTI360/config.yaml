@@ -1,3 +1,6 @@
 seq_id: 0
 cam_id: 0
 image_folder: '../../train_data/images'
+
+segmentor_config: '../../configs/deeplab/deeplab_pretrained.yaml'
+segmentor_weights: '../../pretrained/deeplab_pretrained.pkl'

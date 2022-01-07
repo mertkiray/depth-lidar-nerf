@@ -1,4 +1,7 @@
 import torch
+
+from preprocess.KITTI360.segmentor import SemanticSegmentorHelper
+
 torch.autograd.set_detect_anomaly(True)
 import torch.nn as nn
 import torch.nn.functional as F
@@ -71,7 +74,7 @@ def get_embedder(multires, i=0):
 
 # Model
 class NeRF(nn.Module):
-    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=5, skips=[4], use_viewdirs=False):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, output_ch=5, skips=[4], use_viewdirs=False, semantic_num_classes=None):
         """ 
         """
         super(NeRF, self).__init__()
@@ -81,6 +84,7 @@ class NeRF(nn.Module):
         self.input_ch_views = input_ch_views
         self.skips = skips
         self.use_viewdirs = use_viewdirs
+        self.semantic_num_classes = semantic_num_classes
         
         self.pts_linears = nn.ModuleList(
             [nn.Linear(input_ch, W)] + [nn.Linear(W, W) if i not in self.skips else nn.Linear(W + input_ch, W) for i in range(D-1)])
@@ -98,6 +102,9 @@ class NeRF(nn.Module):
             self.rgb_linear = nn.Linear(W//2, 3)
         else:
             self.output_linear = nn.Linear(W, output_ch)
+
+        if self.semantic_num_classes:
+            self.semantic_linear = nn.Linear(W//2, semantic_num_classes)
 
     def forward(self, x):
         input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
@@ -118,7 +125,13 @@ class NeRF(nn.Module):
                 h = F.relu(h)
 
             rgb = self.rgb_linear(h)
+
             outputs = torch.cat([rgb, alpha], -1)
+
+            if self.semantic_linear:
+                semantic_class = self.semantic_linear(h)
+                outputs = torch.cat([outputs, semantic_class], -1)
+
         else:
             outputs = self.output_linear(h)
 
@@ -519,7 +532,7 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     return samples
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=False, semantic_loss=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -562,10 +575,17 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, white_bkgd=False, pytest=F
     if white_bkgd:
         rgb_map = rgb_map + (1.-acc_map[...,None])
 
+
+    if semantic_loss:
+        semantic_class_preds = torch.sum(weights[..., None] * raw[..., 4:], -2)
+        #semantic_map = F.softmax(semantic_map, dim=0)
+        #_, semantic_class_preds = torch.max(semantic_map, axis=-1)
+        return rgb_map, disp_map, acc_map, weights, depth_map, semantic_class_preds
+
     return rgb_map, disp_map, acc_map, weights, depth_map
 
 
-def sample_sigma(rays_o, rays_d, viewdirs, network, z_vals, network_query):
+def sample_sigma(rays_o, rays_d, viewdirs, network, z_vals, network_query, semantic_loss=False):
     # N_rays = rays_o.shape[0]
     # N_samples = len(z_vals)
     # z_vals = z_vals.expand([N_rays, N_samples])
@@ -576,7 +596,7 @@ def sample_sigma(rays_o, rays_d, viewdirs, network, z_vals, network_query):
     rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3]
     sigma = F.relu(raw[...,3])
 
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, semantic_loss=semantic_loss)
 
     return rgb, sigma, depth_map
 
