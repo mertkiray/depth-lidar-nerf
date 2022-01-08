@@ -1588,7 +1588,7 @@ def train():
             if 'sem_preds0' in extras:
                 semantic_loss0 = F.cross_entropy(sem_preds0, target_semantic)
 
-        loss = loss + args.semantic_lambda * (semantic_loss + semantic_loss0) * 0.5
+        loss = loss + args.semantic_lambda * (semantic_loss + semantic_loss0)
         #loss = loss + args.semantic_lambda * semantic_loss
 
 

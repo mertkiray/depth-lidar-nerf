@@ -104,7 +104,10 @@ class NeRF(nn.Module):
             self.output_linear = nn.Linear(W, output_ch)
 
         if self.semantic_num_classes:
-            self.semantic_linear = nn.Linear(W, semantic_num_classes)
+            #self.semantic_linear = nn.Linear(W, semantic_num_classes)
+            self.semantic_linear = nn.Sequential(nn.Linear(W, W//2), nn.Linear(W//2, semantic_num_classes))
+        else:
+            self.semantic_linear = False
 
     def forward(self, x):
         input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views], dim=-1)
@@ -118,6 +121,8 @@ class NeRF(nn.Module):
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
             feature = self.feature_linear(h)
+            if self.semantic_linear:
+                semantic_class = self.semantic_linear(h)
 
             h = torch.cat([feature, input_views], -1)
         
@@ -130,7 +135,6 @@ class NeRF(nn.Module):
             outputs = torch.cat([rgb, alpha], -1)
 
             if self.semantic_linear:
-                semantic_class = self.semantic_linear(feature)
                 outputs = torch.cat([outputs, semantic_class], -1)
 
         else:
