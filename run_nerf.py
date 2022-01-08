@@ -1323,8 +1323,8 @@ def train():
 
         ##TODO: Noise???
         gan_noise_mean = 0.
-        start_gan_noise_std = 0.1
-        gan_noise_std = 0.1
+        start_gan_noise_std = 0.2
+        gan_noise_std = 0.2
 
         print(f'GAN VALID SHAPE: {gan_valid.shape}')
         print(f'GAN FAKE SHAPE: {gan_fake.shape}')
@@ -1487,6 +1487,9 @@ def train():
             rgb = rgb[:N_batch, :]
             disp = disp[:N_batch]
             acc = acc[:N_batch]
+            if args.semantic_loss:
+                sem_preds = sem_preds[:N_batch]
+                sem_preds0 = sem_preds0[:N_batch]
             depth, depth_col = depth[:N_batch], depth[N_batch:]
             extras = {x:extras[x][:N_batch] for x in extras}
             # extras_col = extras[N_rand:, :]
@@ -1748,7 +1751,7 @@ def train():
                     pred_nerf0 = discriminator(acc_rgb[None,1] + noise)
                     gan_loss0 = criterion_GAN(pred_nerf0, gan_valid)
 
-                loss = loss + 0.5 * (gan_loss + gan_loss0) * args.gan_lambda
+                loss = loss + (gan_loss + gan_loss0) * args.gan_lambda
                 #loss = loss + gan_loss * args.gan_lambda
 
                 if i%args.i_print==0:
@@ -1807,8 +1810,7 @@ def train():
                 loss_fake0 = criterion_GAN(pred_fake0, gan_fake)
 
             # Total loss
-            loss_fakes =  0.5 * (loss_fake + loss_fake0)
-            loss_dis = loss_fakes + 0.5 * loss_real
+            loss_dis = args.gan_lambda * (loss_fake + loss_fake0 + loss_real)
 
             if i % args.i_print == 0:
                 writer.add_scalars("Train/GAN_DISCRIMINATOR_PRED", {
@@ -1824,7 +1826,7 @@ def train():
 
 
         # timer_backward = time.perf_counter()
-        # print('\nconcate:',timer_concate-timer_0)
+        # print('\nconcate:',timer_concate-timer_0)f
         # print('iter',timer_iter-timer_concate)
         # print('split',timer_split-timer_iter)
         # print('loss',timer_loss-timer_split)
@@ -1949,11 +1951,9 @@ def train():
             if not args.depth_loss:
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
-                print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
-                print_depth_loss = depth_loss * args.depth_lambda
-                writer.add_scalar("Train/depth_loss", print_depth_loss, i)
-                tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} Depth Loss: {depth_loss.item()}")
-                print(f' depth_col: {depth_col[0]} []  target_depth: {target_depth[0]}')
+                #print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
+                writer.add_scalar("Train/depth_loss", depth_loss * args.depth_lambda, i)
+                #tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} Depth Loss: {depth_loss.item()}")
 
             writer.add_scalar("Train/loss", loss, i)
             if 'rgb0' in extras and not args.no_coarse:
