@@ -29,7 +29,7 @@ depth_loss = False
 depth_lambda = 0.001
 
 
-feature_loss = False
+feature_loss = True
 feature_loss_type = vgg
 feature_start_iteration = 1
 feature_loss_every_n = 1
@@ -55,5 +55,5 @@ gradH=30
 gradW=30
 
 
-semantic_loss = True
+semantic_loss = False
 semantic_lambda = 1

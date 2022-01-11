@@ -1,8 +1,10 @@
 import imageio
+import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from torchvision import models, transforms, utils
 
+import torch.nn.functional as F
 
 class Vgg19(torch.nn.Module):
     def __init__(self, layers_to_use=None, requires_grad=False):
@@ -12,22 +14,22 @@ class Vgg19(torch.nn.Module):
             print('VGG LAYERS CANNOT BE EMPTY PLEASE SET IT IN CONFIG TXT')
             exit(-1)
 
-        self.layers = {'0': 'conv1_1',
-                  '2': 'conv1_2',
-                  '5': 'conv2_1',
-                  '7': 'conv2_2',
-                  '10': 'conv3_1',
-                  '12': 'conv3_2',
-                  '14': 'conv3_3',
-                  '16': 'conv3_4',
-                  '19': 'conv4_1',
-                  '21': 'conv4_2',
-                  '23': 'conv4_3',
-                  '25': 'conv4_4',
-                  '28': 'conv5_1',
-                  '30': 'conv5_2',
-                  '32': 'conv5_3',
-                  '34': 'conv5_4',
+        self.layers = {'1': 'conv1_1',
+                  '3': 'conv1_2',
+                  '6': 'conv2_1',
+                  '8': 'conv2_2',
+                  '11': 'conv3_1',
+                  '13': 'conv3_2',
+                  '15': 'conv3_3',
+                  '17': 'conv3_4',
+                  '20': 'conv4_1',
+                  '22': 'conv4_2',
+                  '24': 'conv4_3',
+                  '26': 'conv4_4',
+                  '29': 'conv5_1',
+                  '31': 'conv5_2',
+                  '33': 'conv5_3',
+                  '35': 'conv5_4',
                        }
 
         last_layer = 0
@@ -93,19 +95,21 @@ if __name__ == '__main__':
         else:
             return imageio.imread(f)
 
-    vgg = Vgg19()
+    vgg_layers = ['conv5_4']
+    vgg = Vgg19(vgg_layers)
     print(vgg)
 
     # colorImage = np.array(Image.open('train_data/images/0000005930.png'))
-    colorImage = imread('train_data/images/0000005940.png') / 255.
+    #colorImage = imread('train_data/images_4/0000005940.png') / 255.
+    colorImage = imread('asd.png') / 255.
     #colorImage = imread('content.jpg')/255.
 
     color_image_tensor = colorImage[None, ...]
     color_image_tensor = torch.Tensor(color_image_tensor)
     color_image_tensor = color_image_tensor.permute(0, 3,1,2)
+    #color_image_tensor = F.interpolate(color_image_tensor, (64, 256), mode='bilinear')
     normalized_color_image = prepare_images_vgg19(color_image_tensor)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
     features = vgg(normalized_color_image)
     feature1_1 = features['conv1_1'].to(device)
@@ -116,15 +120,17 @@ if __name__ == '__main__':
     feature4_4 = features['conv4_4'].to(device)
     feature5_4 = features['conv5_4'].to(device)
 
+    print(feature1_1)
+
     normalized_color_image = normalized_color_image.to(device)
     color_image_tensor = color_image_tensor.to(device)
 
     a = unnormalize_image(normalized_color_image)
     a = a.permute(0, 2, 3, 1)
     plt.imshow(a[0].cpu())
-    plt.show()
+    #plt.show()
     visualize_features(feature1_1)
-    #exit(0)
+    exit(0)
 
 
     #visualize_features(feature3_1)

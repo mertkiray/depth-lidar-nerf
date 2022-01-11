@@ -467,12 +467,23 @@ def create_nerf(args):
         ckpt = torch.load(ckpt_path)
 
         start = ckpt['global_step']
-        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+
+        if not args.no_reload_optimizer:
+            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
-        model.load_state_dict(ckpt['network_fn_state_dict'])
+        model_dict = model.state_dict()
+        pretrained_dict = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+        #model.load_state_dict(ckpt['network_fn_state_dict'])
+
         if model_fine is not None:
-            model_fine.load_state_dict(ckpt['network_fine_state_dict'])
+            model_fine_dict = model_fine.state_dict()
+            pretrained_fine_dict = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in model_fine_dict}
+            model_fine_dict.update(pretrained_fine_dict)
+            model_fine.load_state_dict(model_fine_dict)
+            #model_fine.load_state_dict(ckpt['network_fine_state_dict'])
 
     ##########################
 
@@ -684,7 +695,8 @@ def config_parser():
                         help='where to store ckpts and logs')
     parser.add_argument("--datadir", type=str, default='./data/llff/fern', 
                         help='input data directory')
-
+    parser.add_argument("--no_reload_optimizer", action='store_false',
+                        help='reload optimizer')
     # training options
     parser.add_argument("--netdepth", type=int, default=8, 
                         help='layers in network')
@@ -858,6 +870,8 @@ def config_parser():
                         help="GAN Loss start iteration")
     parser.add_argument("--gan_disc_lrate", type=float, default=5e-4,
                         help="GAN Discriminator learning rate")
+    parser.add_argument("--gan_noise_std", type=float, default=0.1,
+                        help="GAN Noise std")
     parser.add_argument("--semantic_loss", action='store_true',
                         help="Use semantic loss & Do semantic segmentation")
     parser.add_argument("--semantic_lambda", type=float, default=0.1,
@@ -1323,11 +1337,29 @@ def train():
 
         ##TODO: Noise???
         gan_noise_mean = 0.
-        start_gan_noise_std = 0.2
-        gan_noise_std = 0.2
+        start_gan_noise_std = args.gan_noise_std
+        gan_noise_std = args.gan_noise_std
 
-        print(f'GAN VALID SHAPE: {gan_valid.shape}')
-        print(f'GAN FAKE SHAPE: {gan_fake.shape}')
+        # Load checkpoints
+        if args.ft_path is not None and args.ft_path != 'None':
+            ckpts = [args.ft_path]
+        else:
+            ckpts = [os.path.join(basedir, expname, f) for f in sorted(os.listdir(os.path.join(basedir, expname))) if
+                     'tar' in f]
+
+        print('Found ckpts GAN', ckpts)
+        if len(ckpts) > 0 and not args.no_reload:
+            ckpt_path = ckpts[-1]
+            print('Reloading DISCRIMINATOR from', ckpt_path)
+            ckpt = torch.load(ckpt_path)
+
+            optimizer_D.load_state_dict(ckpt['discriminator_optimizer_dict'])
+            # Load model
+            discriminator.load_state_dict(ckpt['discriminator_state_dict'])
+            gan_noise_std = ckpt['gan_noise_std']
+
+        print(f'START GAN DISCRIMINATOR NOISE is : {start_gan_noise_std}')
+        print(f'GAN DISCRIMINATOR NOISE is : {gan_noise_std}')
 
     # with torch.no_grad():
     #     normalized_training_images = prepare_images_vgg19(images[i_train])
@@ -1617,9 +1649,7 @@ def train():
 
 
             if i % args.i_print == 0:
-                noise = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
-                print_image_gt = gt_image_new + noise
-                print_image_gt = print_image_gt.permute(0,2,3,1)
+                print_image_gt = gt_image_new.permute(0,2,3,1)
                 #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
                 writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
 
@@ -1698,6 +1728,17 @@ def train():
 
 
                     for i_vgg_loss, loss_layer in enumerate(args.vgg_layers):
+
+                        if i % args.i_print == 0:
+                        #if i % 1 == 0:
+                            writer.add_image('Features/gt_features_' + str(loss_layer), torchvision.utils.make_grid(gt_image_features_new[loss_layer][0].unsqueeze(1), normalize=True), i)
+                            writer.add_image('Features/rendered_features_' + str(loss_layer), torchvision.utils.make_grid(features_rgbs[loss_layer][0].unsqueeze(1), normalize=True), i)
+
+                            if args.N_importance > 0:
+                                writer.add_image('Features/rendered_features0_' + str(loss_layer),
+                                                 torchvision.utils.make_grid(features_rgbs[loss_layer][1].unsqueeze(1), normalize=True),
+                                                 i)
+
                         if args.vgg_loss_type == 'l1':
                             feature_loss = feature_loss + torch.mean(torch.abs(features_rgbs[loss_layer][0] - gt_image_features_new[loss_layer])) * args.vgg_layer_weights[i_vgg_loss]
                             if args.N_importance > 0:
@@ -1750,8 +1791,9 @@ def train():
                     noise = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
                     pred_nerf0 = discriminator(acc_rgb[None,1] + noise)
                     gan_loss0 = criterion_GAN(pred_nerf0, gan_valid)
+                    gan_loss = gan_loss + gan_loss0
 
-                loss = loss + (gan_loss + gan_loss0) * args.gan_lambda
+                loss = loss + gan_loss * args.gan_lambda
                 #loss = loss + gan_loss * args.gan_lambda
 
                 if i%args.i_print==0:
@@ -1808,9 +1850,10 @@ def train():
                 noise_fake0 = torch.randn(1, 3, args.nH, args.nW) * gan_noise_std + gan_noise_mean
                 pred_fake0 = discriminator(acc_rgb[None,1].detach() + noise_fake0)
                 loss_fake0 = criterion_GAN(pred_fake0, gan_fake)
+                loss_fake = 0.5 * (loss_fake + loss_fake0)
 
             # Total loss
-            loss_dis = args.gan_lambda * (loss_fake + loss_fake0 + loss_real)
+            loss_dis = loss_fake + loss_real
 
             if i % args.i_print == 0:
                 writer.add_scalars("Train/GAN_DISCRIMINATOR_PRED", {
@@ -1865,7 +1908,7 @@ def train():
             # writer.add_scalar("discriminator_lr", new_lrate, i)
 
             noise_decay_rate = 0.9
-            gan_noise_std = start_gan_noise_std * (noise_decay_rate ** (global_step / 1000))
+            gan_noise_std = start_gan_noise_std * (noise_decay_rate ** (global_step / 5000))
             writer.add_scalar("gan_noise_std", gan_noise_std, i)
 
 
@@ -1883,6 +1926,9 @@ def train():
                 'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict() if render_kwargs_train['network_fn'] is not None else None,
                 'network_fine_state_dict': render_kwargs_train['network_fine'].state_dict() if render_kwargs_train['network_fine'] is not None else None,
                 'optimizer_state_dict': optimizer.state_dict(),
+                'discriminator_state_dict': discriminator.state_dict() if args.gan_loss else None,
+                'gan_noise_std': gan_noise_std if args.gan_loss else None,
+                'discriminator_optimizer_dict': optimizer_D.state_dict() if args.gan_loss else None,
             }, path)
             print('Saved checkpoints at', path)
 
@@ -1945,7 +1991,9 @@ def train():
             if args.gan_loss and i >= args.gan_start_iteration:
                 writer.add_scalars("Train/GAN",{
                 'GAN': gan_loss,
-                'DISCRIMINATOR' : loss_dis
+                'GANLMBDA': gan_loss * args.gan_lambda,
+                'DISCRIMINATOR' : loss_dis,
+                'DISCRIMINATORLMBDA' : loss_dis * args.gan_lambda
                 }, i)
 
             if not args.depth_loss:

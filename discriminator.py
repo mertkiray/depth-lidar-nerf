@@ -39,17 +39,17 @@ class ESRDiscriminator(nn.Module):
         layers = []
         in_filters = in_channels
         #for i, out_filters in enumerate([64, 128, 256, 512]):
-        for i, out_filters in enumerate([64, 128]):
+        for i, out_filters in enumerate([16, 32]):
             layers.extend(discriminator_block(in_filters, out_filters, first_block=(i == 0)))
             in_filters = out_filters
 
         #layers.append(nn.Conv2d(out_filters, 1, kernel_size=3, stride=1, padding=1))
 
         self.classifier = nn.Sequential(
-            #nn.Linear(128 * self.output_shape[1] * self.output_shape[2], 1),
-            nn.Linear(128 * self.output_shape[1] * self.output_shape[2], 32),
-            nn.LeakyReLU(0.2, True),
-            nn.Linear(32, 1),
+            nn.Linear(32 * self.output_shape[1] * self.output_shape[2], 1),
+            #nn.Linear(128 * self.output_shape[1] * self.output_shape[2], 32),
+            #nn.LeakyReLU(0.2, True),
+            #nn.Linear(32, 1),
         )
 
         self.model = nn.Sequential(*layers)

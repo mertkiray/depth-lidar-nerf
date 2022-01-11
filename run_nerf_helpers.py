@@ -121,8 +121,9 @@ class NeRF(nn.Module):
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
             feature = self.feature_linear(h)
+
             if self.semantic_linear:
-                semantic_class = self.semantic_linear(h)
+                semantic_class = self.semantic_linear(feature)
 
             h = torch.cat([feature, input_views], -1)
         
