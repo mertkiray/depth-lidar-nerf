@@ -1,4 +1,4 @@
-expname = mert_gan_pre2
+expname = feb_start_
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -18,40 +18,40 @@ i_testset = 1000
 i_video = 10000
 N_iters = 100000
 i_print = 100
-i_weights = 99999999999999999
+i_weights = 10000
 
 factor=4
 
 train_scene = [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19]
 test_scene = [10]
 no_ndc = False
-colmap_depth = False
-depth_loss = False
-depth_lambda = 1e-2
-depth_rays_prop = 0.1
+colmap_depth = True
+depth_loss = True
+depth_lambda = 0.01
+depth_rays_prop = 0.5
 
-feature_loss = False
+feature_loss = True
 feature_loss_type = vgg
-feature_start_iteration = 101
-feature_loss_every_n = 1
-feature_lambda = 1e-2
+feature_start_iteration = 1
+feature_loss_every_n = 10
+feature_lambda = 0.01
 
-vgg_layers = [conv1_1]
-vgg_layer_weights = [1]
+vgg_layers = [conv1_1, conv1_2]
+vgg_layer_weights = [1, 1]
 vgg_loss_type = l1
 
 lpips_backbone = alex
 lpips_spatial = False
 
 gan_loss = False
-gan_lambda = 1e-2
-gan_start_iteration = 5000
+gan_lambda = 1e-3
+gan_start_iteration = 1
 gan_disc_lrate = 5e-4
 
-nH=32
-nW=128
-gradH=30
+nH=64
+nW= 192
+gradH=32
 gradW=32
 
 semantic_loss = True
-semantic_lambda = 1e-2
+semantic_lambda = 0.01
