@@ -1,26 +1,20 @@
-import os, sys
+import os
 
 import lpips
-import numpy as np
 import imageio
-import json
 import random
 import time
 
 import open3d
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torchvision
 from torch.autograd import Variable
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
 
-import matplotlib.pyplot as plt
 
-from discriminator import ESRDiscriminator, LSDiscriminator, weights_init_normal, DCDiscriminator, BasicDiscriminator
-from vgg19_feature_model import Vgg19, prepare_images_vgg19, visualize_features, unnormalize_image
-from external_models_resnet import Resnet
+from discriminator import ESRDiscriminator
+from vgg19_feature_model import Vgg19, prepare_images_vgg19
 from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
 from run_nerf_helpers import *
 
@@ -31,24 +25,25 @@ from loss import SigmaLoss
 
 
 from data import RayDataset
-from torch.utils.data import DataLoader
 
 from utils.generate_renderpath import generate_renderpath
 
-import cv2
-# import time
 
 # concate_time, iter_time, split_time, loss_time, backward_time = [], [], [], [], []
 from utils.visualization import visualize_depths_as_image, visualize_depths_on_image, visualize_depths_masked_uv
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # torch.cuda.set_device(2)
-np.random.seed(0)
-#torch.manual_seed(0)
 DEBUG = False
 
-from torch.utils.tensorboard import SummaryWriter
 
+
+def seed_everything(seed=3407):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    return seed
 
 
 def batchify(fn, chunk):
@@ -802,6 +797,10 @@ def config_parser():
     
     # debug
     parser.add_argument("--debug",  action='store_true')
+    parser.add_argument("--seed", type=int, default=3407,
+                        help="Seed for reproductibility")
+    parser.add_argument("--should_seed", action='store_true',
+                        help="Seed for reproductibility")
 
     # new experiment by kangle
     parser.add_argument("--N_iters", type=int, default=200000, 
@@ -893,6 +892,12 @@ def train():
             config_params[key] = value
 
     writer.add_text('config',  str(config_params))
+
+
+    if args.should_seed:
+        print(f'SEEDING FOR REPRODUCTIBILITY WITH SEED: {args.seed}')
+        seed_everything(args.seed)
+        print('FINISHED SEEDING')
 
     if args.dataset_type == 'llff':
 
