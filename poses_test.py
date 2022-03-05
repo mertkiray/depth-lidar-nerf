@@ -41,7 +41,6 @@ render_poses_colmap_pcd = open3d.geometry.PointCloud()
 # render_poses = np.array(render_poses)
 # render_poses = render_poses[:, : , 3]
 
-print(pointcloudfrustrum.shape)
 pointcloudfrustrum = pointcloudfrustrum[:, :3]
 
 
@@ -59,19 +58,14 @@ render_poses_pcd.paint_uniform_color([0, 1, 0])
 render_poses_colmap_pcd.paint_uniform_color([1,0, 0])
 
 
-print('asdasdasd')
-
 transform_our = poses_ourt[0]
 transform_our = transform_our[:3,:4]
 
 #transform_colmap = poses_colmap[0]
 #transform_colmap = transform_colmap[:3,:4]
 
-print(poses_ourt[0])
-print(poses_ourt[0].shape)
 ident = np.eye(4)
 ident[:3,:4] = transform_our
-print(ident)
 
 
 mesh_frame = open3d.geometry.TriangleMesh.create_coordinate_frame(size=5, origin=[0, 0, 0])

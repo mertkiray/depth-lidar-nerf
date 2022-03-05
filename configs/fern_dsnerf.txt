@@ -1,4 +1,4 @@
-expname = all_together
+expname = depth_extrapolated_earlystop
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -15,19 +15,27 @@ netchunk = 16384
 netdepth = 4
 
 i_testset = 1000
-i_video = 10000
-N_iters = 50000
+i_video = 50000
+N_iters = 100000
+i_weights = 10000
 
 factor=4
 
 train_scene = [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19]
 test_scene = [10]
-no_ndc = False
-colmap_depth = False
-depth_loss = False
-depth_lambda = 0.001
 
-feature_loss = True
-feature_start_iteration = 1
-feature_loss_every_n = 1
-feature_lambda = 1
+no_ndc = False
+colmap_depth = True
+depth_loss = True
+depth_lambda = 0.1
+
+should_seed = True
+
+depth_inverse_loss = False
+depth_inverse_loss_every_n = 15
+depth_inverse_lambda = 0.1
+
+nH=94
+nW= 352
+gradH=32
+gradW=32

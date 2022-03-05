@@ -1,7 +1,10 @@
-expname = feb_start_
+expname = rgb_only
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
+
+should_seed=True
+seed=3407
 
 N_rand = 1024
 N_samples = 64
@@ -16,7 +19,7 @@ netdepth = 4
 
 i_testset = 1000
 i_video = 10000
-N_iters = 100000
+N_iters = 200000
 i_print = 100
 i_weights = 10000
 
@@ -24,13 +27,15 @@ factor=4
 
 train_scene = [0,1,2,3,4,5,6,7,8,9,11,12,13,14,15,16,17,18,19]
 test_scene = [10]
+
 no_ndc = False
-colmap_depth = True
-depth_loss = True
+
+colmap_depth = False
+depth_loss = False
 depth_lambda = 0.01
 depth_rays_prop = 0.5
 
-feature_loss = True
+feature_loss = False
 feature_loss_type = vgg
 feature_start_iteration = 1
 feature_loss_every_n = 10
@@ -53,5 +58,5 @@ nW= 192
 gradH=32
 gradW=32
 
-semantic_loss = True
+semantic_loss = False
 semantic_lambda = 0.01

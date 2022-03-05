@@ -1,4 +1,5 @@
 import torch
+from lpips import lpips
 
 from preprocess.KITTI360.segmentor import SemanticSegmentorHelper
 

@@ -58,10 +58,7 @@ def visualize_depths_as_image(depth):
 
 def visualize_depths_masked_uv(depth, coord_array):
 
-    print(coord_array.shape)
-    print('bacin')
     depth_map = np.zeros((depth.shape[0], depth.shape[1]))
-    print(depth_map.shape)
 
     for i, coord in enumerate(coord_array):
         depth_map[int(coord[1]), int(coord[0])] = depth[int(coord[1]), int(coord[0])]

@@ -469,9 +469,17 @@ def load_lidar_depth(basedir, hwf, factor=None, bd_factor=.75):
     # Rescale if bd_factor is provided
     sc = 1. if bd_factor is None else 1. / (bds_raw.min() * bd_factor)
 
+    near = np.ndarray.min(bds_raw) * .9 * sc
+    far = np.ndarray.max(bds_raw) * 1. * sc
+
+    print(f'near: {near}')
+    print(f'far: {far}')
+
     scale_data = 1
     if factor:
         scale_data = factor
+
+    print('XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX')
 
     ## TODO: Maybe calculate as load_colmap_depth
     for data in data_list:
@@ -490,11 +498,56 @@ def load_lidar_depth(basedir, hwf, factor=None, bd_factor=.75):
 
         data['depth'] = data['depth'] * sc
 
+        #data['depth'] = (data['depth'] - data['depth'].min() * .9) / (data['depth'].max() * 1. - data['depth'].min() * .9)
+
+        ## 7
+        #data['depth'] = (data['depth'] - data['depth'].min()) / (data['depth'].max() - data['depth'].min())
+
+        ## 9
+        #data['depth'] = (data['depth'] - near) / (far - near)
+
+        ## 8
+        #data['depth'] = data['depth'] / data['depth'].max()
+
+        #data['depth'] = (data['depth'] - near - far) / (far - near) + 1
+
+        print('===========================')
+        print('MERT')
+        print(data['depth'].min())
+        print(data['depth'].max())
+        print('===========================')
+
+
+        data['depth'] = 1 - (1/(data['depth']))
+
+        print('===========================')
+        print('MERVE')
+        print(data['depth'].min())
+        print(data['depth'].max())
+        print('===========================')
+
+
+        #print(data['depth'].shape)
+        #data['depth'][:20000] = 1
+
+        # data['depth'] = np.where(data['depth'] < 0, 0, data['depth'])
+
+        #data['depth'] = data['depth'] * sc
+
         # TODO: ndc?
         #data['depth'] = 1 - (1/data['depth'])
+        #data['depth'] = bds_raw.min() * bds_raw.max() / (bds_raw.max() + data['depth'] * (bds_raw.min() - bds_raw.max()))
 
         # TODO: normalize?
-        #data['depth'] = (data['depth'] - np.min(data['depth'])) / (np.max(data['depth']) - np.min(data['depth']))
+        #data['depth'] = (data['depth']) / ((bds_raw.max() - bds_raw.min()) * sc)
+        #data['depth'] = (data['depth'] - bds_raw.min() * sc) / ((bds_raw.max() * sc) - (bds_raw.min() * sc))
+
+    print('===========================')
+    for data in data_list:
+        print('===========================')
+        print(data['depth'].min())
+        print(data['depth'].max())
+    print('===========================')
 
     return data_list
     

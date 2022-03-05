@@ -3,7 +3,7 @@ import numpy as np
 import re
 import yaml
 import sys
-from preprocess.KITTI360.loadCalibration import loadCalibrationCameraToPose
+from loadCalibration import loadCalibrationCameraToPose
 
 
 def readYAMLFile(fileName):
@@ -156,6 +156,23 @@ class CameraPerspective(Camera):
             v = v[0]
             depth = depth[0]
         return u, v, depth
+
+
+    def cam2imageNew(self, points):
+        ndim = points.ndim
+        if ndim == 2:
+            points = np.expand_dims(points, 0)
+        points_proj = np.matmul(self.K[:3, :3].reshape([1, 3, 3]), points)
+        depth = points_proj[:, 2, :]
+        depth[depth == 0] = -1e-6
+        u = np.round(points_proj[:, 0, :] / np.abs(depth)).astype(np.int)
+        v = np.round(points_proj[:, 1, :] / np.abs(depth)).astype(np.int)
+
+        if ndim == 2:
+            u = u[0]
+            v = v[0]
+            depth = depth[0]
+        return u, v, depth, (points_proj/np.abs(depth))
 
 
 class CameraFisheye(Camera):

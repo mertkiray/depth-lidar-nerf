@@ -5,8 +5,8 @@ import numpy as np
 import yaml
 from matplotlib import pyplot as plt
 
-from Kitti360Dataset import Kitti360Dataset
-from preprocess.KITTI360.segmentor import SemanticSegmentor, SemanticSegmentorHelper
+from Kitti360Dataset_new import Kitti360DatasetNew
+from segmentor import SemanticSegmentor, SemanticSegmentorHelper
 
 
 def imread(f):
@@ -42,6 +42,7 @@ def preprocess_kitti():
     segmentor_helper = SemanticSegmentorHelper()
 
     segmentation_gt = []
+    sky_coords = []
     for image in image_paths:
         im = imread(image)
         #VERY IMPORTANT! DETECTRON2 MODELS USE BGR INPUT
@@ -55,17 +56,23 @@ def preprocess_kitti():
         class_preds = segmentor_helper.get_class_preds(outputs)
         segmentation_gt.append(class_preds)
 
+        sky_coord = segmentor_helper.get_sky_coords(class_preds)
+        sky_coords.append(sky_coord)
+
         # visual = segmentor_helper.get_segmented_image(class_preds)
         #
         # plt.imshow(visual)
         # plt.show()
 
     segmentation_gt = np.stack(segmentation_gt, axis=0)
+
+    sky_coords = np.array(sky_coords)
+
     segmentation_result = {'segmentations': segmentation_gt, 'num_classes': 19}
     np.save('../../train_data/segmentation_gt.npy', segmentation_result)
 
-    dataset = Kitti360Dataset(seq_id, cam_id)
-    dataset.create_poses_bounds_and_gt_depths(image_nums)
+    dataset = Kitti360DatasetNew(seq_id, cam_id)
+    dataset.create_poses_bounds_and_gt_depths(image_nums, sky_coords)
 
     # for frame in config['frame_no']:
     #

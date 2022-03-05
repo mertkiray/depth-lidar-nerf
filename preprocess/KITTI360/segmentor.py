@@ -1,5 +1,6 @@
 import cv2
 import imageio
+import numpy
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -9,8 +10,8 @@ from detectron2.projects.deeplab import add_deeplab_config
 from matplotlib import pyplot as plt
 
 class SemanticSegmentor(object):
-    def __init__(self, segmentor_config = 'configs/deeplab/deeplab_pretrained.yaml',
-                 segmentor_weights='pretrained/deeplab_pretrained.pkl'):
+    def __init__(self, segmentor_config='../../configs/deeplab/deeplab_pretrained.yaml',
+                 segmentor_weights='../../pretrained/deeplab_pretrained.pkl'):
 
         cfg = get_cfg()
         add_deeplab_config(cfg)
@@ -87,6 +88,14 @@ class SemanticSegmentorHelper(object):
         visual = np.array(visual)
         return visual
 
+    def get_sky_coords(self, preds):
+        # class_preds_downsampled = self.downsample_prediction(class_preds, H=94, W=352)
+        indices = np.where(preds == 10)
+        coords = list(zip(indices[1], indices[0]))
+        coords = np.array(coords)
+        return coords
+
+
 
 if __name__ == '__main__':
 
@@ -102,7 +111,7 @@ if __name__ == '__main__':
     segmentor = SemanticSegmentor()
     segmentor_helper = SemanticSegmentorHelper()
 
-    im = imread("train_data/images/0000005940.png")
+    im = imread("../../train_data/images/0000005940.png")
     #VERY IMPORTANT! DETECTRON2 MODELS USE BGR INPUT
     im = im[:, :, ::-1]
 
@@ -117,8 +126,6 @@ if __name__ == '__main__':
 
 
     class_preds = segmentor_helper.get_class_preds(outputs)
-    print(class_preds.shape)
-    exit(0)
     visual = segmentor_helper.get_segmented_image(class_preds)
 
     plt.imshow(visual)

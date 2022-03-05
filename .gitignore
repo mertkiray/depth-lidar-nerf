@@ -4,6 +4,7 @@
 /logs
 /resources
 /runs
+/runs_new
 /train_data/images
 /train_data/poses_bounds.npy
 /train_data/depth_gt.npy

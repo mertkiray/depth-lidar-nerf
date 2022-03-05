@@ -6,6 +6,8 @@ import random
 import time
 
 import open3d
+import pytransform3d
+import torch.backends.cudnn
 import torchvision
 from torch.autograd import Variable
 from tqdm import tqdm, trange
@@ -15,18 +17,17 @@ from torch.utils.data import DataLoader
 
 from discriminator import ESRDiscriminator
 from vgg19_feature_model import Vgg19, prepare_images_vgg19
-from preprocess.KITTI360.Kitti360Dataset import Kitti360Dataset
 from run_nerf_helpers import *
 
 from load_llff import load_llff_data, load_lidar_depth, load_semantic_data
 from load_dtu import load_dtu_data
 
-from loss import SigmaLoss
-
+from loss import SigmaLoss, InverseDepthSmoothnessLoss
 
 from data import RayDataset
 
 from utils.generate_renderpath import generate_renderpath
+from loss import ssim
 
 
 # concate_time, iter_time, split_time, loss_time, backward_time = [], [], [], [], []
@@ -311,7 +312,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
             depth = depth.cpu().numpy()
-            print("max:", np.nanmax(depth))
             # depth = depth / 5 * 255
             # depth_color = cv2.applyColorMap(depth.astype(np.uint8), cv2.COLORMAP_JET)[:,:,::-1]
             # depth_color[np.isnan(depth_color)] = 0
@@ -628,7 +628,7 @@ def render_rays(ray_batch,
 
     if N_importance > 0:
 
-        rgb_map_0, disp_map_0, acc_map_0 = rgb_map, disp_map, acc_map
+        rgb_map_0, disp_map_0, acc_map_0, depth_map0 = rgb_map, disp_map, acc_map, depth_map
 
         if semantic_loss:
             semantic_class_preds0 = semantic_class_preds
@@ -660,6 +660,7 @@ def render_rays(ray_batch,
         ret['rgb0'] = rgb_map_0
         ret['disp0'] = disp_map_0
         ret['acc0'] = acc_map_0
+        ret['depth_map0'] = depth_map0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
         if semantic_loss:
@@ -784,7 +785,7 @@ def config_parser():
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=100, 
+    parser.add_argument("--i_print",   type=int, default=100,
                         help='frequency of console printout and metric loggin')
     parser.add_argument("--i_img",     type=int, default=500, 
                         help='frequency of tensorboard image logging')
@@ -875,6 +876,12 @@ def config_parser():
                         help="Use semantic loss & Do semantic segmentation")
     parser.add_argument("--semantic_lambda", type=float, default=0.1,
                         help="Semantic Loss lambda")
+    parser.add_argument("--depth_inverse_loss", action='store_true',
+                        help="Use depth inverse loss")
+    parser.add_argument("--depth_inverse_lambda", type=float, default=0.1,
+                        help="Depth Inverse Loss lambda")
+    parser.add_argument("--depth_inverse_loss_every_n", type=int, default=15,
+                        help="Calculate depth inv loss every n iteration")
 
     return parser
 
@@ -907,7 +914,7 @@ def train():
         hwf = poses[0,:3,-1]
 
         if args.colmap_depth:
-            depth_gts = load_lidar_depth(args.datadir, hwf=hwf, factor=args.factor )
+            depth_gts = load_lidar_depth(args.datadir, hwf=hwf, factor=args.factor, bd_factor=.75)
 
         if args.semantic_loss:
             segmentation_gt, segmentation_num_class = load_semantic_data(args.datadir, hwf=hwf, factor=args.factor)
@@ -939,9 +946,10 @@ def train():
                         (i not in i_test and i not in i_val)])
 
         # #TODO: For overfit content try delete after:
-        #i_train = np.array([0])
-        #i_test = np.array([0])
-        #i_val = np.array([0])
+
+        # i_train = np.array([0,1])
+        # i_test = np.array([1])
+        # i_val = np.array([1])
 
         print('DEFINING BOUNDS')
         if args.no_ndc:
@@ -972,7 +980,7 @@ def train():
         near = 0.1
         far = 5.0
         if args.colmap_depth:
-            depth_gts = load_lidar_depth(args.datadir, factor=args.factor, bd_factor=.75)
+            depth_gts = load_lidar_depth(args.datadir, hwf=hwf, factor=args.factor, bd_factor=.75)
     else:
         print('Unknown dataset type', args.dataset_type, 'exiting')
         return
@@ -1040,73 +1048,63 @@ def train():
             else:
                 testsavedir = os.path.join(basedir, expname, 'renderonly_{}_{:06d}'.format('path', start))
             os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', render_poses.shape)
 
             if args.render_test_ray:
-                import pytransform3d.visualizer as pv
-                import pytransform3d.transformations as pt
-                dataset = Kitti360Dataset(kitti360Path='data/kitti/KITTI-360', seq=0)
-                print(i_train)
-
-                xxx = depth_gts[0]['coord']
-                print(f'coords: {xxx}')
 
                 # rays_o, rays_d = get_rays(H, W, focal, render_poses[0])
                 index_pose = i_train[0]
+                print(f'index_pose = {index_pose}')
+
                 rays_o, rays_d = get_rays_by_coord_np(H, W, focal, poses[index_pose,:3,:4], depth_gts[index_pose]['coord'])
                 rays_o, rays_d = torch.Tensor(rays_o).to(device), torch.Tensor(rays_d).to(device)
-                rgb, sigma, z_vals, depth_maps = render_test_ray(rays_o, rays_d, hwf, network=render_kwargs_test['network_fine'], **render_kwargs_test)
-                # sigma = sigma.reshape(H, W, -1).cpu().numpy()
-                # z_vals = z_vals.reshape(H, W, -1).cpu().numpy()
-                # np.savez(os.path.join(testsavedir, 'rays.npz'), rgb=rgb.cpu().numpy(), sigma=sigma.cpu().numpy(), z_vals=z_vals.cpu().numpy())
-                # visualize_sigma(sigma[0, :].cpu().numpy(), z_vals[0, :].cpu().numpy(), os.path.join(testsavedir, 'rays.png'))
-                # for k in range(20):
-                #     visualize_weights(weights[k*100, :].cpu().numpy(), z_vals[k*100, :].cpu().numpy(), os.path.join(testsavedir, f'rays_weights_%d.png' % k))
-                print("colmap depth:", depth_gts[index_pose]['depth'][0])
-                print("Estimated depth:", depth_maps[0].cpu().numpy())
-                print(depth_gts[index_pose]['coord'])
+                # rgb, sigma, z_vals, depth_maps = render_test_ray(rays_o, rays_d, hwf, network=render_kwargs_test['network_fine'], **render_kwargs_test)
+                # # sigma = sigma.reshape(H, W, -1).cpu().numpy()
+                # # z_vals = z_vals.reshape(H, W, -1).cpu().numpy()
+                # # np.savez(os.path.join(testsavedir, 'rays.npz'), rgb=rgb.cpu().numpy(), sigma=sigma.cpu().numpy(), z_vals=z_vals.cpu().numpy())
+                # # visualize_sigma(sigma[0, :].cpu().numpy(), z_vals[0, :].cpu().numpy(), os.path.join(testsavedir, 'rays.png'))
+                # # for k in range(20):
+                # #     visualize_weights(weights[k*100, :].cpu().numpy(), z_vals[k*100, :].cpu().numpy(), os.path.join(testsavedir, f'rays_weights_%d.png' % k))
+                # print("colmap depth:", depth_gts[index_pose]['depth'][0])
+                # print("Estimated depth:", depth_maps[0].cpu().numpy())
+                # print(depth_gts[index_pose]['coord'])
 
+                import pytransform3d.visualizer as pv
+                import pytransform3d.camera
 
+                print(f'INDEX POSE: {index_pose}')
 
-                pose_34 = poses[i_train[0], :, :]
-                pose = np.eye(4)
-                pose[:3, :4] = pose_34
-                print('[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]')
+                pose = poses[index_pose, :, :]
+                pose_hom = np.eye(4)
+                pose_hom[:3, :4] = pose
+                pose = pose_hom
+
                 print(pose)
-                print('[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]')
-                print(pose.shape)
-                print('rays shape')
-                print(rays_d.shape)
-                print(rays_o.shape)
-                #
+
                 fig = pv.figure()
 
-                #pose = dataset.get_pose_of_frame(6290)
-                cam2world = pose
                 virtual_image_distance = 1
 
                 sensor_size = np.array([W, H])
                 intrinsic = [
-                    [focal, 0, sensor_size[0] / 2], [0, focal, sensor_size[1] / 2.0], [0, 0, 1]
+                    [focal, 0, sensor_size[0] / 2], [0, focal, sensor_size[1] / 2], [0, 0, 1]
                 ]
                 intrinsic_matrix = np.array(intrinsic)
 
-                fig.plot_transform(A2B=cam2world, strict_check=False)
+                #fig.plot_transform(A2B=pose, s=0.8, strict_check=True)
                 fig.plot_camera(
-                    cam2world=cam2world, M=intrinsic_matrix, sensor_size=sensor_size,
-                    virtual_image_distance=virtual_image_distance)
+                    cam2world=pose, M=intrinsic_matrix, sensor_size=sensor_size,
+                    virtual_image_distance=virtual_image_distance, strict_check=True)
 
 
-                #i = 1
-                print(rays_d.shape)
-                for i in range(500):
-                    i = i * 50
-                    ray_o = rays_o[i].cpu().numpy()
-                    ray_d = rays_d[i].cpu().numpy()
+                for i in range(2000):
+                    ray_o = rays_o[i].cpu()
+                    ray_d = rays_d[i].cpu()
+
+                    #print(f'ray_o: {ray_o} \n ray_d: {ray_d}')
 
                     fig.plot_vector(start=ray_o,
-                                     direction=ray_d,
-                                     c=(1.0, 0.5, 0.0))
+                                    direction=ray_d,
+                                    c=(1.0, 0.5, 0.0))
 
                     P = np.zeros((2, 3))
                     colors = np.empty((2, 3))
@@ -1114,52 +1112,21 @@ def train():
 
                     # ray_o + (depth_gts[index_pose]['depth'][0] * rays_d)
 
-                    print(depth_gts[index_pose]['depth'][i])
-                    print(ray_o)
-                    print(ray_d)
-                    ray_x = [ray_o[0], ray_o[1], ray_o[2] * depth_gts[index_pose]['depth'][i]]
-                    print(ray_x)
                     P[1] = ray_o + (depth_gts[index_pose]['depth'][i] * ray_d)
-                    #P[1] = ray_x
-                    colors[:, 0] = np.linspace(0, 1, len(colors))
+                    colors[:, 0] = np.linspace(1, 0, len(colors))
                     colors[:, 1] = np.linspace(0, 1, len(colors))
-                    fig.plot(P, [0,1,0])
+                    fig.plot(P, colors)
 
-                 # fig.plot_transform(A2B=np.eye(4))
+                load_name = 'preprocess/KITTI360/points_world_lidar_5930.npy'
+                pcd = np.load(load_name)
+                print(pcd[:30])
 
-                # default parameters of a camera in Blender
-
-
-                #
-                # # fig = pv.Figure()
-
-
-                #pcd = dataset.load_velodyne_data(6290)
-                #pcd = dataset.get_velodyne_points_in_camera_coord(pcd)
-
-                #pcd = dataset.load_velodyne_data(5930)
-                pcd = dataset.get_velodyne_points_visible_in_rec_camera(5930)
-
-                print(pcd[0])
-
-                pcd = pcd[:, :3]
-                print(pcd.shape)
-
-                print(f'rays_d : {rays_d}')
-
-                #fig.scatter(pcd, s=0.1)
-                pcd_our = open3d.geometry.PointCloud()
-                pcd_our.points = open3d.utility.Vector3dVector(pcd)
-                pcd_our.paint_uniform_color([1, 0, 0])
-
-                # Come to world
-                pcd_our.transform(pose)
+                pcd_colmap = open3d.geometry.PointCloud()
+                pcd_colmap.points = open3d.utility.Vector3dVector(pcd)
+                pcd_colmap.paint_uniform_color([1, 0, 0])
 
 
-                fig.add_geometry(pcd_our)
-
-
-                #frame = fig.plot_basis(R=np.eye(3), s=0.5)
+                fig.add_geometry(pcd_colmap)
 
 
                 fig.view_init()
@@ -1168,13 +1135,7 @@ def train():
                 else:
                     fig.save_image("__open3d_rendered_image.jpg")
 
-
-
-
-
-
-
-
+                print('anan')
 
             else:
                 if args.semantic_loss:
@@ -1322,6 +1283,9 @@ def train():
             print('FEATURE LOSS TYPE CAN BE vgg OR lpips')
             exit(-1)
 
+    if args.depth_inverse_loss:
+        depth_inv_loss = InverseDepthSmoothnessLoss()
+
     if args.gan_loss:
         ##TODO: Choose discriminator
         discriminator = ESRDiscriminator(input_shape=[3, args.nH, args.nW])
@@ -1382,7 +1346,12 @@ def train():
     # mean = (0.485, 0.456, 0.406)
     # std = (0.229, 0.224, 0.225)
 
-    consistency_keep_keys = ['rgb_map', 'rgb0']
+    if args.depth_inverse_loss:
+        consistency_keep_keys = ['rgb_map', 'rgb0', 'depth_map', 'depth_map0']
+    else:
+        consistency_keep_keys = ['rgb_map', 'rgb0']
+
+    lpips_test = lpips.LPIPS(net='vgg').to(device)
 
     start = start + 1
 
@@ -1587,11 +1556,14 @@ def train():
         depth_loss = 0
         if args.depth_loss:
 
-            #print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
+            # np.save(f'depth_network/data/ndc_{i}', depth_col.cpu().detach().numpy(), allow_pickle=True)
 
-            if not args.no_ndc:
-                depth_col = 1/(1-depth_col)
-                #target_depth = 1 - (1/target_depth)
+            # if not args.no_ndc:
+            #     depth_col = 1/(1-depth_col)
+
+            #     depth_col = bds.min() + (bds.max() - bds.min()) * depth_col
+            #     #depth_col = (2.0 * bds.min() * bds.max()) / (bds.max() + bds.min() - depth_col * (bds.max() - bds.min()))
+            #     #target_depth = 1 - (1/target_depth)
 
             # depth_loss = img2mse(depth_col, target_depth)
             if args.weighted_loss:
@@ -1610,11 +1582,28 @@ def train():
             # print(sigma_loss)
         trans = extras['raw'][...,-1]
 
-        decay_steps = args.lrate_decay * 1000
-        decay_rate = 0.1
-        depth_importance = decay_rate ** (global_step / decay_steps)
-        depth_importance = 1
-        #writer.add_scalar("Train/depth_importance", depth_importance, i)
+        # decay_steps = args.lrate_decay * 100
+        # decay_rate = 0.5
+        # depth_importance = decay_rate ** (global_step / decay_steps)
+
+        depth_importance = 0
+        if args.depth_loss:
+            depth_importance = 1
+            if i >= 15000:
+                depth_importance = 0.1
+            if i >= 20000:
+                depth_importance = 0
+                args.colmap_depth = False
+                args.depth_loss = False
+
+        # if i >= 25000:
+        #     depth_importance = 0.1
+        # if i >= 50000:
+        #     depth_importance = 0.01
+        # if i >= 75000:
+        #     depth_importance = 0.01
+
+        writer.add_scalar("Train/depth_importance", depth_importance, i)
 
         loss = img_loss + args.depth_lambda * depth_importance * depth_loss + args.sigma_lambda * sigma_loss
 
@@ -1632,7 +1621,10 @@ def train():
         #loss = loss + args.semantic_lambda * semantic_loss
 
 
-        if (args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0) or (args.gan_loss and i >= args.gan_start_iteration):
+        if (args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0) \
+                or (args.gan_loss and i >= args.gan_start_iteration) \
+                or (args.depth_inverse_loss and i%args.depth_inverse_loss_every_n==0):
+
             # TODO: RENDER AN IMAGE AND CALCULATE SEMANTIC LOSS
             img_semantic_id = random.choice(i_train)
             #img_semantic_idx = np.where(i_train == img_semantic_id)
@@ -1671,6 +1663,13 @@ def train():
                 #print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
             rgbs = rgbs.permute(0,2,1).clamp(0, 1)
 
+            if args.depth_inverse_loss:
+                if args.N_importance > 0:
+                    depths = torch.stack(
+                        [grad_extras_feature_loss['depth_map'], grad_extras_feature_loss['depth_map0']], dim=0)
+                else:
+                    depths = grad_extras_feature_loss['depth_map'].unsqueeze(0)
+
             with torch.no_grad():
 
                 no_grad_extras_feature_loss = render_feature_loss(H, W, focal, chunk=args.chunk,
@@ -1684,6 +1683,13 @@ def train():
                     no_grad_rgbs = no_grad_extras_feature_loss['rgb_map'].unsqueeze(0)
                     # print(f' RGBS RENDERED BY NERF SHAPE: {rgbs.shape}')
                 no_grad_rgbs = no_grad_rgbs.permute(0,2,1).clamp(0, 1)
+
+                if args.depth_inverse_loss:
+                    if args.N_importance > 0:
+                        no_grad_depths = torch.stack(
+                            [no_grad_extras_feature_loss['depth_map'], no_grad_extras_feature_loss['depth_map0']], dim=0)
+                    else:
+                        no_grad_depths = no_grad_extras_feature_loss['depth_map'].unsqueeze(0)
 
 
             im_shape = list(gt_image_new.data.size())
@@ -1702,6 +1708,22 @@ def train():
             with torch.enable_grad():
                 acc_rgb[:, :, grad_positions[..., 0], grad_positions[..., 1]] = rgbs
 
+            if args.depth_inverse_loss:
+                acc_depth = torch.empty(im_shape[0], 1, im_shape[2], im_shape[3])
+                no_grad_depths = no_grad_depths.unsqueeze(0).permute(1, 0, 2)
+                depths = depths.unsqueeze(0).permute(1, 0, 2)
+                acc_depth[:, :, no_grad_positions[..., 0], no_grad_positions[..., 1]] = no_grad_depths
+                with torch.enable_grad():
+                    acc_depth[:, :, grad_positions[..., 0], grad_positions[..., 1]] = depths
+
+                inv_loss = 0
+                if args.N_importance > 0:
+                    inv_loss = depth_inv_loss(acc_depth, torch.concat([gt_image_new, gt_image_new]))
+                else:
+                    inv_loss = depth_inv_loss(acc_depth, gt_image_new)
+                loss = loss + inv_loss * args.depth_inverse_lambda
+
+
             if i % args.i_print == 0:
                 ##TODO: DO NOT NEED THESE PERMUTES, CHANGE DATAFORMATS IN ADD IMAGE
                 print_rgbs_nerf = acc_rgb.permute(0, 2, 3, 1)
@@ -1711,6 +1733,8 @@ def train():
                 if args.N_importance > 0:
                     writer.add_image('Images/mask0', mask[1], i)
                     writer.add_image('Images/rgb_accumulated0', print_rgbs_nerf[1], i, dataformats='HWC')
+                if args.depth_inverse_loss:
+                    writer.add_image('Trash/depth_inverse', acc_depth[0], i)
 
 
             if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
@@ -1965,7 +1989,6 @@ def train():
         if i%args.i_testset==0 and i > 0 and len(i_test) > 0:
             testsavedir = os.path.join(basedir, expname, 'testset_{:06d}'.format(i))
             os.makedirs(testsavedir, exist_ok=True)
-            print('test poses shape', poses[i_test].shape)
             with torch.no_grad():
 
                 coords = None
@@ -1983,16 +2006,26 @@ def train():
 
             test_loss = img2mse(torch.Tensor(rgbs), images[i_test])
             test_psnr = mse2psnr(test_loss)
+            test_ssim = 0
+            test_lpips = 0
+            with torch.no_grad():
+                test_ssim = ssim(torch.Tensor(rgbs), images[i_test])
+                test_lpips = lpips_test.forward(torch.Tensor(rgbs).permute(0, 3, 1, 2), images[i_test].permute(0,3,1,2))
 
 
             writer.add_scalar("Test/loss", test_loss, i)
             writer.add_scalar("Test/psnr", test_psnr, i)
+            writer.add_scalar("Test/ssim", test_ssim, i)
+            writer.add_scalar("Test/lpips", test_lpips, i)
 
 
         if i%args.i_print==0:
 
             if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
                 writer.add_scalar("Train/feature_loss", feature_loss * args.feature_lambda, i)
+            if args.depth_inverse_loss and i%args.depth_inverse_loss_every_n == 0:
+                writer.add_scalar("Train/depth_inv_loss", inv_loss * args.depth_inverse_lambda, i)
+
             if args.gan_loss and i >= args.gan_start_iteration:
                 writer.add_scalars("Train/GAN",{
                 'GAN': gan_loss,
@@ -2005,7 +2038,7 @@ def train():
                 tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
             else:
                 #print(f'depth_col: {depth_col[0]} [] target_depth: {target_depth[0]}')
-                writer.add_scalar("Train/depth_loss", depth_loss * args.depth_lambda, i)
+                writer.add_scalar("Train/depth_loss", depth_loss * args.depth_lambda * depth_importance, i)
                 #tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()} Depth Loss: {depth_loss.item()}")
 
             writer.add_scalar("Train/loss", loss, i)

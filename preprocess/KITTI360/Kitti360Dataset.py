@@ -18,7 +18,7 @@ from PIL import Image
 
 from preprocess.KITTI360.loadCalibration import loadCalibrationCameraToPose, loadCalibrationRigid
 from preprocess.KITTI360.cameras import CameraPerspective, CameraFisheye
-from preprocess.KITTI360.utils import latlonToMercator, latToScale, postprocessPoses, convertToHomogeneous
+from preprocess.KITTI360.preprocess_utils import latlonToMercator, latToScale, postprocessPoses, convertToHomogeneous
 
 
 class Kitti360Dataset(object):
@@ -182,6 +182,7 @@ class Kitti360Dataset(object):
         mask = np.logical_and(np.logical_and(np.logical_and(u >= 0, u < camera.width), v >= 0), v < camera.height)
         # visualize points within 30 meters
         mask = np.logical_and(mask, depth > 0)
+        mask = np.logical_and(mask, depth < 30)
         return mask
 
     def get_depth_map_in_image_space(self, frame):
@@ -199,6 +200,8 @@ class Kitti360Dataset(object):
 
         depthMap[v[mask], u[mask]] = depth[mask]
 
+        print(np.max(depthMap))
+
         return depthMap
 
     def get_depth_and_coords(self, frame):
@@ -215,7 +218,9 @@ class Kitti360Dataset(object):
         coords = list(zip(u[mask], v[mask]))
         coords = np.array(coords)
         depth_arr = np.array(depth[mask])
+
         print(f'before depth shape : {depth_arr.shape}')
+        print(coords.shape)
 
         # TODO: every image has different far/close bounds for now
         # max_depth = np.percentile(depth[mask], 99.5)
@@ -228,17 +233,29 @@ class Kitti360Dataset(object):
 
         print(f' points world shape: {points_world.shape}')
         points_world = points_world[:, :3]
+        print(depth_arr.shape)
+        print(coords.shape)
         print(points_world.shape)
+        exit(0)
+
+
+        save_name = 'points_world_lidar_' + str(frame) + '.npy'
+        points_cam = points_cam[mask]
+        np.save(save_name, points_world[:, :3])
 
         pose = self.get_rec_cam0_to_world(frame)
+        #
+        # line = (points_world - pose[:3, 3])
+        # print(pose[:3, 2].reshape(3, 1).shape)
+        # print(line.shape)
+        # depth = pose[:3, 2].reshape(3, 1).T @ line.T
+        # depth_arr = depth.T.squeeze()
+        #
+        # print(depth_arr.shape)
 
-        line = (points_world - pose[:3, 3])
-        print(pose[:3, 2].reshape(3, 1).shape)
-        print(line.shape)
-        depth = pose[:3, 2].reshape(3, 1).T @ line.T
-        depth_arr = depth.T.squeeze()
-
-        print(depth.shape)
+        # depth_arr = (pose[:3, 2] @ (points_world - pose[:3, 3]).T)
+        # print(np.max(depth))
+        # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 
         min_depth = np.min(depth_arr)
         max_depth = np.max(depth_arr)
@@ -438,22 +455,6 @@ class Kitti360Dataset(object):
 
         return pose
 
-    def get_rays_by_coord_np(self, c2w, coords):
-        i, j = (coords[:, 0] - self.camera.width * 0.5) / self.camera.focal, -(coords[:, 1] - self.camera.height * 0.5) / self.camera.focal
-
-        print(f'i: {i}  //  j:{j}')
-
-        dirs = np.stack([i, j, -np.ones_like(i)], -1)
-        rays_d = np.sum(dirs[..., np.newaxis, :] * c2w[:3, :3], -1)
-        rays_o = np.broadcast_to(c2w[:3, -1], np.shape(rays_d))
-        return rays_o, rays_d
-
-
-    def visualize_rays(self):
-
-        poses_arr = np.load(os.path.join('../../train_data/poses_bounds.npy', 'poses_bounds.npy'))
-
-
 if __name__ == '__main__':
     visualizeIn2D = True
     # sequence index
@@ -474,9 +475,11 @@ if __name__ == '__main__':
     # plt.imshow(depth_arr)
     # plt.show()
     #dataset.visualize_data(frame, cam_id, visualizeIn2D)
-
-    pcd = dataset.get_accumulated_pointcloud()
-    dataset.convert_accumulated_pcd_to_cam(pcd, frame)
+    out = dataset.dense_map(frame, grid=1)
+    plt.figure(figsize=(20, 40))
+    plt.imsave("depth_map_%06d.png" % frame, out)
+    #pcd = dataset.get_accumulated_pointcloud()
+    #dataset.convert_accumulated_pcd_to_cam(pcd, frame)
 
     #dataset.calculate_world_to_cam0_accumulated_pcd()
 
