@@ -1,4 +1,4 @@
-expname = depth_extrapolated_earlystop
+expname = depth_extrapolated_with_smoothness_and_feature_vgg_last_try_semantic
 basedir = ./logs
 datadir = ./train_data
 dataset_type = llff
@@ -27,15 +27,30 @@ test_scene = [10]
 no_ndc = False
 colmap_depth = True
 depth_loss = True
-depth_lambda = 0.1
+depth_lambda = 0.01
 
 should_seed = True
 
 depth_inverse_loss = False
-depth_inverse_loss_every_n = 15
-depth_inverse_lambda = 0.1
+depth_inverse_loss_every_n = 10
+depth_inverse_lambda = 0.01
+
+feature_loss = False
+feature_loss_type = vgg
+vgg_layers = [conv1_2, conv2_2, conv3_4, conv4_4, conv5_4]
+vgg_layer_weights = [0.1, 0.1, 1, 1, 1]
+vgg_loss_type = l1
+
+no_reload_optimizer = True
+
+feature_start_iteration = 1
+feature_loss_every_n = 10
+feature_lambda = 0.01
 
 nH=94
 nW= 352
 gradH=32
-gradW=32
+gradW=64
+
+semantic_loss = True
+semantic_lambda = 0.01

@@ -321,10 +321,6 @@ def render_path(render_poses, hwf, chunk, render_kwargs, gt_imgs=None, savedir=N
 
 
             if writer:
-
-
-                print('extras')
-
                 if 'sem_preds' in extras:
                     sem_preds = extras['sem_preds'].permute(2,0,1)
                     sem_preds = semantic_segmentor.get_probabilities(sem_preds)
@@ -1582,27 +1578,9 @@ def train():
             # print(sigma_loss)
         trans = extras['raw'][...,-1]
 
-        # decay_steps = args.lrate_decay * 100
-        # decay_rate = 0.5
-        # depth_importance = decay_rate ** (global_step / decay_steps)
-
-        depth_importance = 0
-        if args.depth_loss:
-            depth_importance = 1
-            if i >= 15000:
-                depth_importance = 0.1
-            if i >= 20000:
-                depth_importance = 0
-                args.colmap_depth = False
-                args.depth_loss = False
-
-        # if i >= 25000:
-        #     depth_importance = 0.1
-        # if i >= 50000:
-        #     depth_importance = 0.01
-        # if i >= 75000:
-        #     depth_importance = 0.01
-
+        decay_steps = args.lrate_decay * 1000
+        decay_rate = 0.1
+        depth_importance = decay_rate ** (global_step / decay_steps)
         writer.add_scalar("Train/depth_importance", depth_importance, i)
 
         loss = img_loss + args.depth_lambda * depth_importance * depth_loss + args.sigma_lambda * sigma_loss
@@ -1647,7 +1625,6 @@ def train():
 
             if i % args.i_print == 0:
                 print_image_gt = gt_image_new.permute(0,2,3,1)
-                #print(f' PRINTING GT CROPPED IMAGE AFTER PERMUTE: {print_image_gt.shape}')
                 writer.add_image('Images/gt_cropped_image', print_image_gt[0], i, dataformats='HWC')
 
 
@@ -1716,18 +1693,13 @@ def train():
                 with torch.enable_grad():
                     acc_depth[:, :, grad_positions[..., 0], grad_positions[..., 1]] = depths
 
-                inv_loss = 0
-                if args.N_importance > 0:
-                    inv_loss = depth_inv_loss(acc_depth, torch.concat([gt_image_new, gt_image_new]))
-                else:
-                    inv_loss = depth_inv_loss(acc_depth, gt_image_new)
-                loss = loss + inv_loss * args.depth_inverse_lambda
+                inv_loss = depth_inv_loss(acc_depth, acc_rgb)
+                loss = loss + inv_loss * args.depth_inverse_lambda * depth_importance
 
 
             if i % args.i_print == 0:
                 ##TODO: DO NOT NEED THESE PERMUTES, CHANGE DATAFORMATS IN ADD IMAGE
                 print_rgbs_nerf = acc_rgb.permute(0, 2, 3, 1)
-                #print(f'PRINTING IMAGES RENDERED BY NERF: {print_rgbs_nerf.shape} ')
                 writer.add_image('Images/mask', mask[0], i)
                 writer.add_image('Images/rgb_accumulated', print_rgbs_nerf[0], i, dataformats='HWC')
                 if args.N_importance > 0:
@@ -1759,7 +1731,6 @@ def train():
                     for i_vgg_loss, loss_layer in enumerate(args.vgg_layers):
 
                         if i % args.i_print == 0:
-                        #if i % 1 == 0:
                             writer.add_image('Features/gt_features_' + str(loss_layer), torchvision.utils.make_grid(gt_image_features_new[loss_layer][0].unsqueeze(1), normalize=True), i)
                             writer.add_image('Features/rendered_features_' + str(loss_layer), torchvision.utils.make_grid(features_rgbs[loss_layer][0].unsqueeze(1), normalize=True), i)
 
@@ -2024,7 +1995,7 @@ def train():
             if args.feature_loss and i >= args.feature_start_iteration and i%args.feature_loss_every_n==0:
                 writer.add_scalar("Train/feature_loss", feature_loss * args.feature_lambda, i)
             if args.depth_inverse_loss and i%args.depth_inverse_loss_every_n == 0:
-                writer.add_scalar("Train/depth_inv_loss", inv_loss * args.depth_inverse_lambda, i)
+                writer.add_scalar("Train/depth_inv_loss", inv_loss * args.depth_inverse_lambda * depth_importance, i)
 
             if args.gan_loss and i >= args.gan_start_iteration:
                 writer.add_scalars("Train/GAN",{

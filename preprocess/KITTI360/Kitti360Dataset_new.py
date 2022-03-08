@@ -188,11 +188,6 @@ class Kitti360DatasetNew(object):
         min_depth = np.percentile(depth_arr, .1)
         max_depth = np.percentile(depth_arr, 99.9)
 
-        # if sky_coords is not None:
-        #     coords = np.concatenate([coords, sky_coords])
-        #     max_depth_sky = np.ones(shape=(sky_coords.shape[0],)) * (max_depth)
-        #     depth_arr = np.concatenate([depth_arr, max_depth_sky])
-
         depth_arr, coords = self.complete_depth(depth_arr, coords, 9999999, sky_coords)
         min_depth = np.percentile(depth_arr, .1)
         max_depth = np.percentile(depth_arr, 99.9)
@@ -212,7 +207,6 @@ class Kitti360DatasetNew(object):
         #depth_image = cm(depth_image / depth_image.max())[..., :3]
         # plt.imshow(depth_image)
         # plt.show()
-
 
         mod_depth_arr = depth_utils.fill_in_multiscale(depth_image, max_depth=depth_arr.max()+1,
                                                                      extrapolate=True)

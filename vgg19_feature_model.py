@@ -101,7 +101,7 @@ if __name__ == '__main__':
 
     # colorImage = np.array(Image.open('train_data/images/0000005930.png'))
     #colorImage = imread('train_data/images_4/0000005940.png') / 255.
-    colorImage = imread('asd.png') / 255.
+    colorImage = imread('individualImage333gt.png') / 255.
     #colorImage = imread('content.jpg')/255.
 
     color_image_tensor = colorImage[None, ...]
@@ -114,23 +114,21 @@ if __name__ == '__main__':
     features = vgg(normalized_color_image)
     feature1_1 = features['conv1_1'].to(device)
     feature1_2 = features['conv1_2'].to(device)
-    feature2_1 = features['conv2_1'].to(device)
     feature2_2 = features['conv2_2'].to(device)
     feature3_4 = features['conv3_4'].to(device)
     feature4_4 = features['conv4_4'].to(device)
     feature5_4 = features['conv5_4'].to(device)
 
-    print(feature1_1)
 
     normalized_color_image = normalized_color_image.to(device)
     color_image_tensor = color_image_tensor.to(device)
 
-    a = unnormalize_image(normalized_color_image)
-    a = a.permute(0, 2, 3, 1)
-    plt.imshow(a[0].cpu())
-    #plt.show()
-    visualize_features(feature1_1)
-    exit(0)
+    # a = unnormalize_image(normalized_color_image)
+    # a = a.permute(0, 2, 3, 1)
+    # plt.imshow(a[0].cpu())
+    # #plt.show()
+    # visualize_features(feature1_1)
+    # exit(0)
 
 
     #visualize_features(feature3_1)
@@ -148,14 +146,14 @@ if __name__ == '__main__':
     #input_img = prepare_images_vgg19(input_img).contiguous()
 
     input_img = input_img.to(device)
-    optimizer = torch.optim.Adam([input_img], lr=5e-4)
+    optimizer = torch.optim.Adam([input_img], lr=1e-3)
     vgg = vgg.to(device)
     input_img.requires_grad_(True)
     vgg.requires_grad_(False)
     loss = torch.nn.MSELoss().to(device)
 
     run = [0]
-    while run[0] <= 100:
+    while run[0] <= 20000:
         optimizer.zero_grad()
 
         def closure():
@@ -163,24 +161,17 @@ if __name__ == '__main__':
                 input_img.clamp_(0, 1)
 
             feature_input = vgg(input_img)
-            #feature_loss = torch.mean((feature1_1 - feature_input['conv1_1']) **2)
-            #feature_loss = feature_loss + torch.mean((feature1_2 - feature_input['conv1_2'])**2)
-            #feature_loss += torch.mean((feature2_1 - feature_input['conv2_1'])**2)
-            #feature_loss = feature_loss + torch.mean((feature2_2 - feature_input['conv2_2'])**2)
-            #feature_loss = feature_loss + torch.mean((feature3_1 - feature_input['conv3_1'])**2)
-            #feature_loss += torch.mean((feature3_2 - feature_input['conv3_2'])**2)
-            #feature_loss += torch.mean((feature3_3 - feature_input['conv3_3'])**2)
-            #feature_loss += torch.mean((feature3_4 - feature_input['conv3_4'])**2)
-            #feature_loss += torch.mean((feature4_1 - feature_input['conv4_1'])**2)
-            #feature_loss = feature_loss + torch.mean((feature4_2 - feature_input['conv4_2'])**2)
-            #feature_loss += torch.mean((feature4_3 - feature_input['conv4_3'])**2)
-            #feature_loss += torch.mean((feature4_4 - feature_input['conv4_4'])**2)
-            #feature_loss = feature_loss + torch.mean((feature5_1 - feature_input['conv5_1'])**2)
-            feature_loss = torch.mean((feature1_2 - feature_input['conv1_2'])) * 0.1
-            feature_loss = feature_loss + torch.mean((feature2_2 - feature_input['conv2_2'])) * 0.1
-            feature_loss = feature_loss + torch.mean((feature3_4 - feature_input['conv3_4']))
-            feature_loss = feature_loss + torch.mean((feature4_4 - feature_input['conv4_4']))
-            feature_loss = feature_loss + torch.mean((feature5_4 - feature_input['conv5_4']))
+
+            # feature_loss = torch.mean((feature1_2 - feature_input['conv1_2']) ** 2)
+            # feature_loss = feature_loss + torch.mean((feature2_2 - feature_input['conv2_2']) ** 2)
+
+            feature_loss = torch.mean(torch.abs(feature1_2 - feature_input['conv1_2']))
+            feature_loss = feature_loss + torch.mean(torch.abs(feature2_2 - feature_input['conv2_2']))
+
+            # feature_loss = torch.mean(torch.abs(feature1_1 - feature_input['conv1_1'])) * 1
+
+            # feature_loss = feature_loss + torch.mean(torch.abs(feature4_4 - feature_input['conv4_4'])) * 1
+            # feature_loss = feature_loss + torch.mean(torch.abs(feature5_4 - feature_input['conv5_4'])) * 1
             feature_loss.backward()
 
             run[0] += 1
@@ -204,6 +195,6 @@ if __name__ == '__main__':
     input_img = input_img[0]
     print(input_img.shape)
     print(type(input_img))
-    plt.imsave('style_image3.png', input_img, cmap='gray')
+    plt.imsave('style_image4.png', input_img, cmap='gray')
 
 

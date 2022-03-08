@@ -41,7 +41,7 @@ feature_start_iteration = 1
 feature_loss_every_n = 10
 feature_lambda = 0.01
 
-vgg_layers = [conv1_1, conv1_2]
+vgg_layers = [conv1_1, conv2_2, conv3_4, conv4_4, conv5_4]
 vgg_layer_weights = [1, 1]
 vgg_loss_type = l1
 
