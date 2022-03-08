@@ -1046,11 +1046,8 @@ def train():
             os.makedirs(testsavedir, exist_ok=True)
 
             if args.render_test_ray:
-
                 # rays_o, rays_d = get_rays(H, W, focal, render_poses[0])
                 index_pose = i_train[0]
-                print(f'index_pose = {index_pose}')
-
                 rays_o, rays_d = get_rays_by_coord_np(H, W, focal, poses[index_pose,:3,:4], depth_gts[index_pose]['coord'])
                 rays_o, rays_d = torch.Tensor(rays_o).to(device), torch.Tensor(rays_d).to(device)
                 # rgb, sigma, z_vals, depth_maps = render_test_ray(rays_o, rays_d, hwf, network=render_kwargs_test['network_fine'], **render_kwargs_test)
@@ -1063,76 +1060,45 @@ def train():
                 # print("colmap depth:", depth_gts[index_pose]['depth'][0])
                 # print("Estimated depth:", depth_maps[0].cpu().numpy())
                 # print(depth_gts[index_pose]['coord'])
-
                 import pytransform3d.visualizer as pv
-                import pytransform3d.camera
-
-                print(f'INDEX POSE: {index_pose}')
-
                 pose = poses[index_pose, :, :]
                 pose_hom = np.eye(4)
                 pose_hom[:3, :4] = pose
                 pose = pose_hom
-
-                print(pose)
-
                 fig = pv.figure()
-
                 virtual_image_distance = 1
-
                 sensor_size = np.array([W, H])
                 intrinsic = [
                     [focal, 0, sensor_size[0] / 2], [0, focal, sensor_size[1] / 2], [0, 0, 1]
                 ]
                 intrinsic_matrix = np.array(intrinsic)
-
-                #fig.plot_transform(A2B=pose, s=0.8, strict_check=True)
                 fig.plot_camera(
                     cam2world=pose, M=intrinsic_matrix, sensor_size=sensor_size,
                     virtual_image_distance=virtual_image_distance, strict_check=True)
-
-
                 for i in range(2000):
                     ray_o = rays_o[i].cpu()
                     ray_d = rays_d[i].cpu()
-
-                    #print(f'ray_o: {ray_o} \n ray_d: {ray_d}')
-
                     fig.plot_vector(start=ray_o,
                                     direction=ray_d,
                                     c=(1.0, 0.5, 0.0))
-
                     P = np.zeros((2, 3))
                     colors = np.empty((2, 3))
                     P[0] = ray_o
-
-                    # ray_o + (depth_gts[index_pose]['depth'][0] * rays_d)
-
                     P[1] = ray_o + (depth_gts[index_pose]['depth'][i] * ray_d)
                     colors[:, 0] = np.linspace(1, 0, len(colors))
                     colors[:, 1] = np.linspace(0, 1, len(colors))
                     fig.plot(P, colors)
-
                 load_name = 'preprocess/KITTI360/points_world_lidar_5930.npy'
                 pcd = np.load(load_name)
-                print(pcd[:30])
-
                 pcd_colmap = open3d.geometry.PointCloud()
                 pcd_colmap.points = open3d.utility.Vector3dVector(pcd)
                 pcd_colmap.paint_uniform_color([1, 0, 0])
-
-
                 fig.add_geometry(pcd_colmap)
-
-
                 fig.view_init()
                 if "__file__" in globals():
                     fig.show()
                 else:
                     fig.save_image("__open3d_rendered_image.jpg")
-
-                print('anan')
-
             else:
                 if args.semantic_loss:
                     rgbs, disps, _ = render_path(render_poses, hwf, args.chunk, render_kwargs_test, gt_imgs=images, savedir=testsavedir, render_factor=args.render_factor)
@@ -1500,22 +1466,6 @@ def train():
             depth_col = depth
 
         # timer_split = time.perf_counter()
-
-
-        # Mert WIP
-        # if i%args.i_print==0:
-        #     with torch.no_grad():
-        #         print(f'render poses shape: {render_poses[0:1,:,:].shape}')
-        #         rgbsanan, dispsanan = render_path(render_poses[0:1,   :,:], hwf, args.chunk, render_kwargs_train)
-        #
-        #     print('=========')
-        #     print(rgbsanan.shape)
-        #     print('=========')
-        #
-        #     plt.imshow(rgbsanan.squeeze())
-        #     plt.show()
-
-
 
         # layer_count = 0
         # for parm in render_kwargs_train['network_fine'].parameters():
