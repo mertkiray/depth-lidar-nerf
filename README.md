@@ -1,1 +1,1 @@
-
+  In this work,  we address the lack of imagery by in-troducing additional constraints on the optimisation of theNeural Radiance Field by using depth information providedby a LIDAR sensor.From experiments and various ablationstudies we have conducted, we have concluded that usingthe constraints of a LIDAR sensor alone is not sufficient toachieve the desired results. In addition to depth constraints,we extend and experiment with the notions of extrapolatedLidar  depth,  feature  loss,  semantic  loss,  GAN-based  loss and inverse-depth smoothing loss.
